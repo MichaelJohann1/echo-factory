@@ -29,6 +29,8 @@ juce_add_plugin(EchoFactory
     IS_MIDI_EFFECT           FALSE
     AU_MAIN_TYPE             kAudioUnitType_Effect
     VST3_CATEGORIES          Fx Delay
+    MICROPHONE_PERMISSION_ENABLED TRUE   # without it macOS gives the Standalone silent input
+    MICROPHONE_PERMISSION_TEXT    "Echo Factory processes live audio from your microphone or audio interface."
     COPY_PLUGIN_AFTER_BUILD  TRUE
     NEEDS_WEB_BROWSER        FALSE
     NEEDS_CURL               FALSE)
