@@ -56,6 +56,7 @@ private:
     std::atomic<float>* lowCutParam       = nullptr;
     std::atomic<float>* highCutParam      = nullptr;
     std::atomic<float>* filterPosParam    = nullptr;
+    std::atomic<float>* freezeParam       = nullptr;
 
     double hostBpm = 120.0;
 

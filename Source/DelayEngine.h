@@ -8,6 +8,9 @@
 
     Filters in the feedback loop shape every repeat a little more; output-only
     filters shape the echoes once without affecting what is fed back.
+
+    Freeze crossfades the write path from (input + feedback) to the buffer's own
+    unfiltered output, so the current contents loop forever without decaying.
 */
 class DelayEngine
 {
@@ -24,6 +27,9 @@ public:
     void setHighCutHz (float hz);
     void setFiltersInFeedbackLoop (bool inLoop) { filtersInLoop = inLoop; }
 
+    /** While frozen, input is no longer written and the buffer loops at full level. */
+    void setFrozen (bool shouldFreeze) { freezeAmount.setTargetValue (shouldFreeze ? 1.0f : 0.0f); }
+
     void process (juce::AudioBuffer<float>& buffer);
 
 private:
@@ -31,7 +37,7 @@ private:
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> delayLine;
     juce::dsp::StateVariableTPTFilter<float> lowCutFilter, highCutFilter;
-    juce::SmoothedValue<float> delaySamples, feedback, mix;
+    juce::SmoothedValue<float> delaySamples, feedback, mix, freezeAmount;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> lowCutHz { 20.0f }, highCutHz { 20000.0f };
     bool lowCutOn = false, highCutOn = false, filtersInLoop = true;
     double sampleRate = 44100.0;

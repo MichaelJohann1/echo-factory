@@ -44,6 +44,15 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     addAndMakeVisible (syncButton);
     syncButtonAttachment = std::make_unique<ButtonAttachment> (p.apvts, Params::ID::sync.getParamID(), syncButton);
 
+    // ---- Freeze ----------------------------------------------------------
+    freezeButton.setTitle ("Freeze");
+    freezeButton.setDescription ("When on, the delay stops taking in new audio and repeats what is in the buffer "
+                                 "forever without fading. The dry signal still passes through.");
+    freezeButton.setWantsKeyboardFocus (true);
+    freezeButton.setExplicitFocusOrder (4);
+    addAndMakeVisible (freezeButton);
+    freezeButtonAttachment = std::make_unique<ButtonAttachment> (p.apvts, Params::ID::freeze.getParamID(), freezeButton);
+
     // Follows the sync parameter whether it's changed here, by automation or by a preset.
     syncWatcher = std::make_unique<juce::ParameterAttachment> (
         *p.apvts.getParameter (Params::ID::sync.getParamID()),
@@ -52,24 +61,24 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
 
     // ---- Feedback / Mix --------------------------------------------------
     setupPercentSlider (feedbackSlider, feedbackLabel, "Feedback", "Amount of the echo fed back into the delay, 0 to 95 percent.");
-    feedbackSlider.setExplicitFocusOrder (4);
+    feedbackSlider.setExplicitFocusOrder (5);
     feedbackAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::feedback.getParamID(), feedbackSlider);
 
     setupPercentSlider (mixSlider, mixLabel, "Mix", "Balance between the dry and delayed signal, 0 to 100 percent.");
-    mixSlider.setExplicitFocusOrder (5);
+    mixSlider.setExplicitFocusOrder (6);
     mixAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::mix.getParamID(), mixSlider);
 
     // ---- Filters ---------------------------------------------------------
     setupFrequencySlider (lowCutSlider, lowCutLabel, "Low Cut",
                           "High-pass filter on the echoes, off or 21 hertz to 2 kilohertz. Turn fully down for off.",
                           Params::lowCutMinHz);
-    lowCutSlider.setExplicitFocusOrder (6);
+    lowCutSlider.setExplicitFocusOrder (7);
     lowCutAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::lowCut.getParamID(), lowCutSlider);
 
     setupFrequencySlider (highCutSlider, highCutLabel, "High Cut",
                           "Low-pass filter on the echoes, 500 hertz to 20 kilohertz or off. Turn fully up for off.",
                           Params::highCutMaxHz);
-    highCutSlider.setExplicitFocusOrder (7);
+    highCutSlider.setExplicitFocusOrder (8);
     highCutAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::highCut.getParamID(), highCutSlider);
 
     filterPosLabel.setText ("Filter Position", juce::dontSendNotification);
@@ -80,7 +89,7 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     filterPosBox.setDescription ("In Feedback Loop filters every repeat, so echoes get progressively darker or thinner. "
                                  "Output Only filters the echoes once, without changing the feedback.");
     filterPosBox.setWantsKeyboardFocus (true);
-    filterPosBox.setExplicitFocusOrder (8);
+    filterPosBox.setExplicitFocusOrder (9);
     addAndMakeVisible (filterPosBox);
     filterPosAttachment = std::make_unique<ComboBoxAttachment> (p.apvts, Params::ID::filterPos.getParamID(), filterPosBox);
 
@@ -200,7 +209,7 @@ void EchoFactoryEditor::showSaveDialog()
 
 void EchoFactoryEditor::setMainControlsVisible (bool shouldBeVisible)
 {
-    for (auto* c : std::initializer_list<juce::Component*> { &presetBar, &timeSlider, &syncButton, &feedbackSlider, &mixSlider,
+    for (auto* c : std::initializer_list<juce::Component*> { &presetBar, &timeSlider, &syncButton, &freezeButton, &feedbackSlider, &mixSlider,
                                                             &timeLabel, &feedbackLabel, &mixLabel,
                                                             &lowCutSlider, &highCutSlider, &filterPosBox,
                                                             &lowCutLabel, &highCutLabel, &filterPosLabel })
@@ -276,7 +285,10 @@ void EchoFactoryEditor::resized()
     const auto columnWidth = row1.getWidth() / 4;
 
     timeSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
-    syncButton.setBounds (row1.removeFromLeft (columnWidth).withSizeKeepingCentre (columnWidth - 12, 32));
+    auto toggles = row1.removeFromLeft (columnWidth).withSizeKeepingCentre (columnWidth - 12, 84);
+    syncButton.setBounds (toggles.removeFromTop (40));
+    toggles.removeFromTop (8);
+    freezeButton.setBounds (toggles.removeFromTop (36));
     feedbackSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
     mixSlider.setBounds (row1.reduced (6, 0));
 

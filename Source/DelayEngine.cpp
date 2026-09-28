@@ -19,6 +19,7 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     highCutHz.reset (sampleRate, 0.05);
     feedback.reset (sampleRate, 0.02);
     mix.reset (sampleRate, 0.02);
+    freezeAmount.reset (sampleRate, 0.02);
 
     reset();
 }
@@ -35,6 +36,7 @@ void DelayEngine::reset()
     delaySamples.setCurrentAndTargetValue (delaySamples.getTargetValue());
     feedback.setCurrentAndTargetValue (feedback.getTargetValue());
     mix.setCurrentAndTargetValue (mix.getTargetValue());
+    freezeAmount.setCurrentAndTargetValue (freezeAmount.getTargetValue());
 }
 
 void DelayEngine::setDelayMs (float ms)
@@ -78,9 +80,15 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
 
     for (int i = 0; i < numSamples; ++i)
     {
-        const auto d   = delaySamples.getNextValue();
+        const auto frozen = freezeAmount.getNextValue();
         const auto fb  = feedback.getNextValue();
         const auto wet = mix.getNextValue();
+
+        // Whole-sample delay while frozen: repeated fractional interpolation
+        // would slowly dull the looping audio.
+        auto d = delaySamples.getNextValue();
+        if (frozen > 0.0f)
+            d = std::round (d);
 
         if (lowCutHz.isSmoothing())  lowCutFilter.setCutoffFrequency (lowCutHz.getNextValue());
         if (highCutHz.isSmoothing()) highCutFilter.setCutoffFrequency (highCutHz.getNextValue());
@@ -91,18 +99,10 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
             const auto dry = data[i];
             const auto delayed = delayLine.popSample (ch, d);
 
-            float echo;
+            const auto echo = filter (ch, delayed);
+            const auto normalWrite = dry + fb * (filtersInLoop ? echo : delayed);
 
-            if (filtersInLoop)
-            {
-                echo = filter (ch, delayed);
-                delayLine.pushSample (ch, dry + fb * echo);
-            }
-            else
-            {
-                delayLine.pushSample (ch, dry + fb * delayed);
-                echo = filter (ch, delayed);
-            }
+            delayLine.pushSample (ch, normalWrite + frozen * (delayed - normalWrite));
 
             data[i] = dry * (1.0f - wet) + echo * wet;
         }

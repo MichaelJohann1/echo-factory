@@ -139,6 +139,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (std::make_unique<AudioParameterChoice> (
         ID::filterPos, "Filter Position", getFilterPositionNames(), (int) FilterPosition::inFeedbackLoop));
 
+    layout.add (std::make_unique<AudioParameterBool> (
+        ID::freeze, "Freeze", false,
+        AudioParameterBoolAttributes()
+            .withStringFromValueFunction ([] (bool v, int) { return v ? String ("On") : String ("Off"); })));
+
     return layout;
 }
 }

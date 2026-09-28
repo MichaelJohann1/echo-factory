@@ -46,6 +46,7 @@ private:
     AccessibleSlider timeSlider, feedbackSlider, mixSlider;
     juce::Label timeLabel, feedbackLabel, mixLabel;
     juce::ToggleButton syncButton { "Sync to host tempo" };
+    juce::ToggleButton freezeButton { "Freeze" };
 
     AccessibleSlider lowCutSlider, highCutSlider;
     juce::Label lowCutLabel, highCutLabel, filterPosLabel;
@@ -53,7 +54,7 @@ private:
 
     std::unique_ptr<SliderAttachment> timeAttachment, feedbackAttachment, mixAttachment;
     std::unique_ptr<SliderAttachment> lowCutAttachment, highCutAttachment;
-    std::unique_ptr<ButtonAttachment> syncButtonAttachment;
+    std::unique_ptr<ButtonAttachment> syncButtonAttachment, freezeButtonAttachment;
     std::unique_ptr<ComboBoxAttachment> filterPosAttachment;
     std::unique_ptr<juce::ParameterAttachment> syncWatcher;
     bool showingSyncDivisions = false;

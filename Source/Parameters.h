@@ -14,6 +14,7 @@ namespace Params
         inline const juce::ParameterID lowCut       { "lowCut",       1 };
         inline const juce::ParameterID highCut      { "highCut",      1 };
         inline const juce::ParameterID filterPos    { "filterPos",    1 };
+        inline const juce::ParameterID freeze       { "freeze",       1 };
     }
 
     constexpr float minDelayMs = 1.0f;

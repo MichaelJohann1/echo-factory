@@ -16,6 +16,7 @@ EchoFactoryProcessor::EchoFactoryProcessor()
     lowCutParam       = apvts.getRawParameterValue (Params::ID::lowCut.getParamID());
     highCutParam      = apvts.getRawParameterValue (Params::ID::highCut.getParamID());
     filterPosParam    = apvts.getRawParameterValue (Params::ID::filterPos.getParamID());
+    freezeParam       = apvts.getRawParameterValue (Params::ID::freeze.getParamID());
 }
 
 bool EchoFactoryProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -64,6 +65,7 @@ void EchoFactoryProcessor::updateEngineParameters()
     engine.setLowCutHz  (lowCut  <= Params::lowCutMinHz  ? 0.0f : lowCut);
     engine.setHighCutHz (highCut >= Params::highCutMaxHz ? 0.0f : highCut);
     engine.setFiltersInFeedbackLoop (juce::roundToInt (filterPosParam->load()) == (int) Params::FilterPosition::inFeedbackLoop);
+    engine.setFrozen (freezeParam->load() >= 0.5f);
 }
 
 void EchoFactoryProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
