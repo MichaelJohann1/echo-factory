@@ -43,8 +43,8 @@ private:
 
     PresetBar presetBar;
 
-    AccessibleSlider timeSlider, feedbackSlider, mixSlider;
-    juce::Label timeLabel, feedbackLabel, mixLabel;
+    AccessibleSlider timeSlider, smoothingSlider, feedbackSlider, mixSlider;
+    juce::Label timeLabel, smoothingLabel, feedbackLabel, mixLabel;
     juce::ToggleButton syncButton { "Sync to host tempo" };
     juce::ToggleButton freezeButton { "Freeze" };
 
@@ -52,7 +52,7 @@ private:
     juce::Label lowCutLabel, highCutLabel, filterPosLabel;
     juce::ComboBox filterPosBox;
 
-    std::unique_ptr<SliderAttachment> timeAttachment, feedbackAttachment, mixAttachment;
+    std::unique_ptr<SliderAttachment> timeAttachment, smoothingAttachment, feedbackAttachment, mixAttachment;
     std::unique_ptr<SliderAttachment> lowCutAttachment, highCutAttachment;
     std::unique_ptr<ButtonAttachment> syncButtonAttachment, freezeButtonAttachment;
     std::unique_ptr<ComboBoxAttachment> filterPosAttachment;

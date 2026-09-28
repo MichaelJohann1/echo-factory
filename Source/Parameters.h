@@ -7,6 +7,7 @@ namespace Params
     namespace ID
     {
         inline const juce::ParameterID delayTimeMs  { "delayTimeMs",  1 };
+        inline const juce::ParameterID timeSmoothingMs { "timeSmoothingMs", 1 };
         inline const juce::ParameterID sync         { "sync",         1 };
         inline const juce::ParameterID syncDivision { "syncDivision", 1 };
         inline const juce::ParameterID feedback     { "feedback",     1 };
@@ -19,6 +20,10 @@ namespace Params
 
     constexpr float minDelayMs = 1.0f;
     constexpr float maxDelayMs = 5000.0f;
+
+    // How long the delay time takes to glide to a new value.
+    constexpr float maxTimeSmoothingMs     = 2000.0f;
+    constexpr float defaultTimeSmoothingMs = 50.0f;
 
     // At these extremes the filter is bypassed and reads as "Off".
     constexpr float lowCutMinHz  = 20.0f;

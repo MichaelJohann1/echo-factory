@@ -65,12 +65,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout layout;
 
-    NormalisableRange<float> timeRange { minDelayMs, maxDelayMs, 1.0f };
-    timeRange.setSkewForCentre (500.0f);
-
-    layout.add (std::make_unique<AudioParameterFloat> (
-        ID::delayTimeMs, "Delay Time", timeRange, 400.0f,
-        AudioParameterFloatAttributes()
+    auto millisecondAttributes = []
+    {
+        return AudioParameterFloatAttributes()
             .withLabel ("ms")
             .withStringFromValueFunction ([] (float v, int) { return formatMilliseconds (v, false); })
             .withValueFromStringFunction ([] (const String& text)
@@ -79,7 +76,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
                 const auto number = t.getFloatValue();
                 const bool isSeconds = (t.endsWith ("s") && ! t.endsWith ("ms")) || t.contains ("sec");
                 return isSeconds ? number * 1000.0f : number;
-            })));
+            });
+    };
+
+    NormalisableRange<float> timeRange { minDelayMs, maxDelayMs, 1.0f };
+    timeRange.setSkewForCentre (500.0f);
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::delayTimeMs, "Delay Time", timeRange, 400.0f, millisecondAttributes()));
+
+    NormalisableRange<float> smoothingRange { 0.0f, maxTimeSmoothingMs, 1.0f };
+    smoothingRange.setSkewForCentre (250.0f);
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::timeSmoothingMs, "Time Smoothing", smoothingRange, defaultTimeSmoothingMs, millisecondAttributes()));
 
     layout.add (std::make_unique<AudioParameterBool> (
         ID::sync, "Tempo Sync", false,

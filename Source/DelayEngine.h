@@ -19,6 +19,9 @@ public:
     void reset();
 
     void setDelayMs (float ms);
+
+    /** How long a delay time change takes to reach its new value. 0 jumps instantly. */
+    void setDelaySmoothingMs (float ms);
     void setFeedback (float amount01);
     void setMix (float wet01);
 
@@ -40,6 +43,7 @@ private:
     juce::SmoothedValue<float> delaySamples, feedback, mix, freezeAmount;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> lowCutHz { 20.0f }, highCutHz { 20000.0f };
     bool lowCutOn = false, highCutOn = false, filtersInLoop = true;
+    int delaySmoothingSamples = -1;
     double sampleRate = 44100.0;
     float maxDelaySamples = 1.0f;
 };

@@ -9,6 +9,7 @@ EchoFactoryProcessor::EchoFactoryProcessor()
       apvts (*this, nullptr, "EchoFactoryState", Params::createLayout())
 {
     delayTimeParam    = apvts.getRawParameterValue (Params::ID::delayTimeMs.getParamID());
+    smoothingParam    = apvts.getRawParameterValue (Params::ID::timeSmoothingMs.getParamID());
     syncParam         = apvts.getRawParameterValue (Params::ID::sync.getParamID());
     syncDivisionParam = apvts.getRawParameterValue (Params::ID::syncDivision.getParamID());
     feedbackParam     = apvts.getRawParameterValue (Params::ID::feedback.getParamID());
@@ -55,6 +56,7 @@ float EchoFactoryProcessor::getTargetDelayMs() const
 
 void EchoFactoryProcessor::updateEngineParameters()
 {
+    engine.setDelaySmoothingMs (smoothingParam->load());
     engine.setDelayMs (getTargetDelayMs());
     engine.setFeedback (feedbackParam->load() * 0.01f);
     engine.setMix (mixParam->load() * 0.01f);

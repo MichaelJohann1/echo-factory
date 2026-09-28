@@ -14,7 +14,8 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     lowCutFilter.prepare (spec);
     highCutFilter.prepare (spec);
 
-    delaySamples.reset (sampleRate, 0.05);
+    delaySmoothingSamples = -1; // forces the ramp length to be recalculated for this sample rate
+    setDelaySmoothingMs (50.0f);
     lowCutHz.reset (sampleRate, 0.05);
     highCutHz.reset (sampleRate, 0.05);
     feedback.reset (sampleRate, 0.02);
@@ -43,6 +44,24 @@ void DelayEngine::setDelayMs (float ms)
 {
     const auto samples = juce::jlimit (1.0f, maxDelaySamples, (float) (ms * 0.001 * sampleRate));
     delaySamples.setTargetValue (samples);
+}
+
+void DelayEngine::setDelaySmoothingMs (float ms)
+{
+    const auto numSamples = juce::roundToInt (juce::jmax (0.0f, ms) * 0.001 * sampleRate);
+
+    if (numSamples == delaySmoothingSamples)
+        return;
+
+    delaySmoothingSamples = numSamples;
+
+    // SmoothedValue::reset() snaps to the target, so carry on from wherever
+    // the glide currently is, now at the new speed.
+    const auto current = delaySamples.getCurrentValue();
+    const auto target  = delaySamples.getTargetValue();
+    delaySamples.reset (numSamples);
+    delaySamples.setCurrentAndTargetValue (current);
+    delaySamples.setTargetValue (target);
 }
 
 void DelayEngine::setFeedback (float amount01) { feedback.setTargetValue (juce::jlimit (0.0f, 0.95f, amount01)); }

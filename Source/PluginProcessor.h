@@ -49,6 +49,7 @@ private:
     DelayEngine engine;
 
     std::atomic<float>* delayTimeParam    = nullptr;
+    std::atomic<float>* smoothingParam    = nullptr;
     std::atomic<float>* syncParam         = nullptr;
     std::atomic<float>* syncDivisionParam = nullptr;
     std::atomic<float>* feedbackParam     = nullptr;

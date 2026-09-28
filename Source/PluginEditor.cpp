@@ -36,11 +36,19 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     timeSlider.setExplicitFocusOrder (2);
     addAndMakeVisible (timeSlider);
 
+    // ---- Time smoothing --------------------------------------------------
+    setupSlider (smoothingSlider, smoothingLabel, "Smoothing",
+                 "How long the delay time takes to glide to a new setting, from 0 milliseconds (instant) to 2 seconds. "
+                 "Longer settings give a smoother, tape-like pitch bend.");
+    smoothingSlider.spokenTextFromValue = [] (double v) { return Params::formatMilliseconds ((float) v, true); };
+    smoothingSlider.setExplicitFocusOrder (3);
+    smoothingAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::timeSmoothingMs.getParamID(), smoothingSlider);
+
     // ---- Sync ------------------------------------------------------------
     syncButton.setTitle ("Sync to host tempo");
     syncButton.setDescription ("When on, the delay time follows the host tempo as a note division.");
     syncButton.setWantsKeyboardFocus (true);
-    syncButton.setExplicitFocusOrder (3);
+    syncButton.setExplicitFocusOrder (4);
     addAndMakeVisible (syncButton);
     syncButtonAttachment = std::make_unique<ButtonAttachment> (p.apvts, Params::ID::sync.getParamID(), syncButton);
 
@@ -49,7 +57,7 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     freezeButton.setDescription ("When on, the delay stops taking in new audio and repeats what is in the buffer "
                                  "forever without fading. The dry signal still passes through.");
     freezeButton.setWantsKeyboardFocus (true);
-    freezeButton.setExplicitFocusOrder (4);
+    freezeButton.setExplicitFocusOrder (5);
     addAndMakeVisible (freezeButton);
     freezeButtonAttachment = std::make_unique<ButtonAttachment> (p.apvts, Params::ID::freeze.getParamID(), freezeButton);
 
@@ -61,24 +69,24 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
 
     // ---- Feedback / Mix --------------------------------------------------
     setupPercentSlider (feedbackSlider, feedbackLabel, "Feedback", "Amount of the echo fed back into the delay, 0 to 95 percent.");
-    feedbackSlider.setExplicitFocusOrder (5);
+    feedbackSlider.setExplicitFocusOrder (6);
     feedbackAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::feedback.getParamID(), feedbackSlider);
 
     setupPercentSlider (mixSlider, mixLabel, "Mix", "Balance between the dry and delayed signal, 0 to 100 percent.");
-    mixSlider.setExplicitFocusOrder (6);
+    mixSlider.setExplicitFocusOrder (7);
     mixAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::mix.getParamID(), mixSlider);
 
     // ---- Filters ---------------------------------------------------------
     setupFrequencySlider (lowCutSlider, lowCutLabel, "Low Cut",
                           "High-pass filter on the echoes, off or 21 hertz to 2 kilohertz. Turn fully down for off.",
                           Params::lowCutMinHz);
-    lowCutSlider.setExplicitFocusOrder (7);
+    lowCutSlider.setExplicitFocusOrder (8);
     lowCutAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::lowCut.getParamID(), lowCutSlider);
 
     setupFrequencySlider (highCutSlider, highCutLabel, "High Cut",
                           "Low-pass filter on the echoes, 500 hertz to 20 kilohertz or off. Turn fully up for off.",
                           Params::highCutMaxHz);
-    highCutSlider.setExplicitFocusOrder (8);
+    highCutSlider.setExplicitFocusOrder (9);
     highCutAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::highCut.getParamID(), highCutSlider);
 
     filterPosLabel.setText ("Filter Position", juce::dontSendNotification);
@@ -89,7 +97,7 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     filterPosBox.setDescription ("In Feedback Loop filters every repeat, so echoes get progressively darker or thinner. "
                                  "Output Only filters the echoes once, without changing the feedback.");
     filterPosBox.setWantsKeyboardFocus (true);
-    filterPosBox.setExplicitFocusOrder (9);
+    filterPosBox.setExplicitFocusOrder (10);
     addAndMakeVisible (filterPosBox);
     filterPosAttachment = std::make_unique<ComboBoxAttachment> (p.apvts, Params::ID::filterPos.getParamID(), filterPosBox);
 
@@ -98,7 +106,7 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
 
     setWantsKeyboardFocus (false);
     setResizable (false, false);
-    setSize (520, 500);
+    setSize (640, 500);
 }
 
 EchoFactoryEditor::~EchoFactoryEditor()
@@ -209,8 +217,8 @@ void EchoFactoryEditor::showSaveDialog()
 
 void EchoFactoryEditor::setMainControlsVisible (bool shouldBeVisible)
 {
-    for (auto* c : std::initializer_list<juce::Component*> { &presetBar, &timeSlider, &syncButton, &freezeButton, &feedbackSlider, &mixSlider,
-                                                            &timeLabel, &feedbackLabel, &mixLabel,
+    for (auto* c : std::initializer_list<juce::Component*> { &presetBar, &timeSlider, &smoothingSlider, &syncButton, &freezeButton, &feedbackSlider, &mixSlider,
+                                                            &timeLabel, &smoothingLabel, &feedbackLabel, &mixLabel,
                                                             &lowCutSlider, &highCutSlider, &filterPosBox,
                                                             &lowCutLabel, &highCutLabel, &filterPosLabel })
         c->setVisible (shouldBeVisible);
@@ -282,9 +290,10 @@ void EchoFactoryEditor::resized()
 
     // Row 1: delay controls
     auto row1 = area.removeFromTop (area.getHeight() / 2).withTrimmedTop (24).withTrimmedBottom (8); // top: room for labels
-    const auto columnWidth = row1.getWidth() / 4;
+    const auto columnWidth = row1.getWidth() / 5;
 
     timeSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
+    smoothingSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
     auto toggles = row1.removeFromLeft (columnWidth).withSizeKeepingCentre (columnWidth - 12, 84);
     syncButton.setBounds (toggles.removeFromTop (40));
     toggles.removeFromTop (8);
