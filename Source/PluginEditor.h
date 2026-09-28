@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "PluginProcessor.h"
 #include "ui/AccessibleSlider.h"
+#include "ui/PerformPad.h"
 #include "ui/PresetBar.h"
 #include "ui/SavePresetDialog.h"
 
@@ -53,10 +54,17 @@ private:
     juce::Label widthLabel, lowCutLabel, highCutLabel, filterPosLabel;
     juce::ComboBox filterPosBox;
 
+    PerformPad performPad;
+    AccessibleSlider throwLevelSlider, freezeFadeSlider;
+    juce::Label throwLevelLabel, freezeFadeLabel, inputModeLabel;
+    juce::ComboBox inputModeBox;
+    juce::TextButton resetButton { "Reset" };
+
     std::unique_ptr<SliderAttachment> timeAttachment, smoothingAttachment, feedbackAttachment, mixAttachment;
     std::unique_ptr<SliderAttachment> widthAttachment, lowCutAttachment, highCutAttachment;
     std::unique_ptr<ButtonAttachment> syncButtonAttachment, pingPongButtonAttachment, freezeButtonAttachment;
-    std::unique_ptr<ComboBoxAttachment> filterPosAttachment;
+    std::unique_ptr<SliderAttachment> throwLevelAttachment, freezeFadeAttachment;
+    std::unique_ptr<ComboBoxAttachment> filterPosAttachment, inputModeAttachment;
     std::unique_ptr<juce::ParameterAttachment> syncWatcher;
     bool showingSyncDivisions = false;
 

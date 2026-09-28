@@ -20,6 +20,52 @@ EchoFactoryProcessor::EchoFactoryProcessor()
     freezeParam       = apvts.getRawParameterValue (Params::ID::freeze.getParamID());
     pingPongParam     = apvts.getRawParameterValue (Params::ID::pingPong.getParamID());
     widthParam        = apvts.getRawParameterValue (Params::ID::stereoWidthMs.getParamID());
+    throwParam        = apvts.getRawParameterValue (Params::ID::throwGesture.getParamID());
+    inputModeParam    = apvts.getRawParameterValue (Params::ID::inputMode.getParamID());
+    throwLevelParam   = apvts.getRawParameterValue (Params::ID::throwLevelDb.getParamID());
+    freezeFadeParam   = apvts.getRawParameterValue (Params::ID::freezeFadeMs.getParamID());
+
+    apvts.addParameterListener (Params::ID::reset.getParamID(), this);
+    startTimerHz (30);
+}
+
+EchoFactoryProcessor::~EchoFactoryProcessor()
+{
+    stopTimer();
+    apvts.removeParameterListener (Params::ID::reset.getParamID(), this);
+}
+
+void EchoFactoryProcessor::parameterChanged (const juce::String&, float newValue)
+{
+    if (newValue >= 0.5f)
+        resetRequested = true;
+}
+
+void EchoFactoryProcessor::timerCallback()
+{
+    if (resetRequested.exchange (false))
+        resetPerformance();
+}
+
+void EchoFactoryProcessor::resetPerformance()
+{
+    for (const auto* id : { &Params::ID::throwGesture, &Params::ID::freeze, &Params::ID::tapestop,
+                            &Params::ID::runaway, &Params::ID::reverse, &Params::ID::reset })
+    {
+        auto* param = apvts.getParameter (id->getParamID());
+
+        if (param->getValue() >= 0.5f)
+        {
+            param->beginChangeGesture();
+            param->setValueNotifyingHost (0.0f);
+            param->endChangeGesture();
+        }
+    }
+
+    resetRequested = false; // the Reset parameter itself has just been released
+
+    if (onPerformanceReset != nullptr)
+        onPerformanceReset();
 }
 
 bool EchoFactoryProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -69,7 +115,15 @@ void EchoFactoryProcessor::updateEngineParameters()
     engine.setLowCutHz  (lowCut  <= Params::lowCutMinHz  ? 0.0f : lowCut);
     engine.setHighCutHz (highCut >= Params::highCutMaxHz ? 0.0f : highCut);
     engine.setFiltersInFeedbackLoop (juce::roundToInt (filterPosParam->load()) == (int) Params::FilterPosition::inFeedbackLoop);
+    engine.setFreezeFadeMs (freezeFadeParam->load());
     engine.setFrozen (freezeParam->load() >= 0.5f);
+
+    // Throw sends the input in at Throw Level; otherwise it goes in at unity,
+    // or not at all in Throw Only mode.
+    const auto throwing  = throwParam->load() >= 0.5f;
+    const auto throwOnly = juce::roundToInt (inputModeParam->load()) == (int) Params::InputMode::throwOnly;
+    engine.setInputSend (throwing ? juce::Decibels::decibelsToGain (throwLevelParam->load())
+                                  : throwOnly ? 0.0f : 1.0f);
     engine.setPingPong (pingPongParam->load() >= 0.5f);
     engine.setStereoWidthMs (widthParam->load());
 }

@@ -40,6 +40,7 @@ target_sources(EchoFactory
         Source/PresetManager.cpp
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
+        Source/ui/PerformPad.cpp
         Source/ui/PresetBar.cpp
         Source/ui/SavePresetDialog.cpp)
 

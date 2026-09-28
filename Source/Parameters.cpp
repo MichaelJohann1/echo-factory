@@ -46,6 +46,29 @@ const juce::StringArray& getFilterPositionNames()
     return names;
 }
 
+const juce::StringArray& getInputModeNames()
+{
+    static const juce::StringArray names { "Always", "Throw Only" };
+    return names;
+}
+
+juce::String formatDecibels (float db, bool spoken)
+{
+    if (! spoken)
+        return (db > 0.0f ? "+" : "") + juce::String (db, 1) + " dB";
+
+    const auto rounded = std::round (db * 10.0f) / 10.0f;
+    auto magnitude = juce::String (std::abs (rounded), 1);
+
+    if (magnitude.endsWith (".0"))
+        magnitude = magnitude.dropLastCharacters (2);
+
+    if (juce::exactlyEqual (rounded, 0.0f))
+        return "0 decibels";
+
+    return (rounded > 0.0f ? "plus " : "minus ") + magnitude + (magnitude == "1" ? " decibel" : " decibels");
+}
+
 juce::String formatFrequency (float hz, float offHz, bool spoken)
 {
     if (juce::approximatelyEqual (hz, offHz))
@@ -164,6 +187,37 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ID::stereoWidthMs, "Stereo Width", widthRange, 0.0f, millisecondAttributes()));
+
+    // ---- Performance ---------------------------------------------------------
+    auto gesture = [&layout] (const ParameterID& id, const String& name)
+    {
+        layout.add (std::make_unique<AudioParameterBool> (
+            id, name, false,
+            AudioParameterBoolAttributes()
+                .withStringFromValueFunction ([] (bool v, int) { return v ? String ("On") : String ("Off"); })));
+    };
+
+    gesture (ID::throwGesture, "Throw");
+    gesture (ID::tapestop,     "Tapestop");
+    gesture (ID::runaway,      "Runaway");
+    gesture (ID::reverse,      "Reverse");
+    gesture (ID::reset,        "Reset");
+
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ID::inputMode, "Input", getInputModeNames(), (int) InputMode::always));
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::throwLevelDb, "Throw Level", NormalisableRange<float> { minThrowLevelDb, maxThrowLevelDb, 0.1f }, defaultThrowLevelDb,
+        AudioParameterFloatAttributes()
+            .withLabel ("dB")
+            .withStringFromValueFunction ([] (float v, int) { return formatDecibels (v, false); })
+            .withValueFromStringFunction ([] (const String& text) { return text.getFloatValue(); })));
+
+    NormalisableRange<float> freezeFadeRange { minFreezeFadeMs, maxFreezeFadeMs, 1.0f };
+    freezeFadeRange.setSkewForCentre (200.0f);
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::freezeFadeMs, "Freeze Fade", freezeFadeRange, defaultFreezeFadeMs, millisecondAttributes()));
 
     return layout;
 }

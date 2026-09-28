@@ -24,7 +24,9 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     highCutHz.reset (sampleRate, 0.05);
     feedback.reset (sampleRate, 0.02);
     mix.reset (sampleRate, 0.02);
-    freezeAmount.reset (sampleRate, 0.02);
+    freezeFadeSamples = -1;
+    setFreezeFadeMs (20.0f);
+    inputSend.reset (sampleRate, 0.01);
     pingPongAmount.reset (sampleRate, 0.02);
     widthSamples.reset (sampleRate, 0.05);
 
@@ -46,6 +48,7 @@ void DelayEngine::reset()
     mix.setCurrentAndTargetValue (mix.getTargetValue());
     freezeAmount.setCurrentAndTargetValue (freezeAmount.getTargetValue());
     pingPongAmount.setCurrentAndTargetValue (pingPongAmount.getTargetValue());
+    inputSend.setCurrentAndTargetValue (inputSend.getTargetValue());
     widthSamples.setCurrentAndTargetValue (widthSamples.getTargetValue());
 }
 
@@ -71,6 +74,23 @@ void DelayEngine::setDelaySmoothingMs (float ms)
     delaySamples.reset (numSamples);
     delaySamples.setCurrentAndTargetValue (current);
     delaySamples.setTargetValue (target);
+}
+
+void DelayEngine::setFreezeFadeMs (float ms)
+{
+    const auto numSamples = juce::jmax (1, juce::roundToInt (ms * 0.001 * sampleRate));
+
+    if (numSamples == freezeFadeSamples)
+        return;
+
+    freezeFadeSamples = numSamples;
+
+    // As with the delay time, keep any fade in progress going from where it is.
+    const auto current = freezeAmount.getCurrentValue();
+    const auto target  = freezeAmount.getTargetValue();
+    freezeAmount.reset (numSamples);
+    freezeAmount.setCurrentAndTargetValue (current);
+    freezeAmount.setTargetValue (target);
 }
 
 void DelayEngine::setStereoWidthMs (float ms)
@@ -117,6 +137,7 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
         const auto frozen = freezeAmount.getNextValue();
         const auto fb  = feedback.getNextValue();
         const auto wet = mix.getNextValue();
+        const auto send = inputSend.getNextValue();
         const auto pingPong = isStereo ? pingPongAmount.getNextValue() : 0.0f;
         const auto width = widthSamples.getNextValue();
 
@@ -138,7 +159,7 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
                 const auto delayed = delayLine.popSample (ch, d);
 
                 const auto echo = filter (ch, delayed);
-                const auto normalWrite = dry + fb * (filtersInLoop ? echo : delayed);
+                const auto normalWrite = send * dry + fb * (filtersInLoop ? echo : delayed);
 
                 delayLine.pushSample (ch, normalWrite + frozen * (delayed - normalWrite));
 
@@ -156,10 +177,10 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
         const float looped[2] { filtersInLoop ? echo[0] : delayed[0], filtersInLoop ? echo[1] : delayed[1] };
 
         // Normal: each channel feeds back into itself.
-        const float normalWrite[2] { dry[0] + fb * looped[0], dry[1] + fb * looped[1] };
+        const float normalWrite[2] { send * dry[0] + fb * looped[0], send * dry[1] + fb * looped[1] };
 
         // Ping-pong: mono input -> left, left -> right at full level, right -> left via feedback.
-        const float pingPongWrite[2] { 0.5f * (dry[0] + dry[1]) + fb * looped[1], looped[0] };
+        const float pingPongWrite[2] { 0.5f * send * (dry[0] + dry[1]) + fb * looped[1], looped[0] };
 
         // Frozen: loop the buffer as it is, swapping sides in ping-pong so it keeps bouncing.
         const float frozenWrite[2] { delayed[0] + pingPong * (delayed[1] - delayed[0]),

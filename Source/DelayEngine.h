@@ -17,6 +17,10 @@
     into the left line through the feedback amount. With zero feedback that
     gives exactly two repeats: one left, then one right.
 
+    The input send scales how much of the input is written into the delay; the
+    processor uses it for Throw and the Throw Only input mode. The dry signal
+    is not affected.
+
     Stereo width delays the right channel of the echoes by a few milliseconds,
     on the output only, so it doesn't build up in the feedback loop.
 */
@@ -40,6 +44,10 @@ public:
 
     /** While frozen, input is no longer written and the buffer loops at full level. */
     void setFrozen (bool shouldFreeze) { freezeAmount.setTargetValue (shouldFreeze ? 1.0f : 0.0f); }
+    void setFreezeFadeMs (float ms);
+
+    /** Linear gain of the input into the delay line. */
+    void setInputSend (float gain) { inputSend.setTargetValue (juce::jmax (0.0f, gain)); }
 
     void setPingPong (bool shouldPingPong) { pingPongAmount.setTargetValue (shouldPingPong ? 1.0f : 0.0f); }
     void setStereoWidthMs (float ms);
@@ -52,10 +60,10 @@ private:
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> delayLine;
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> widthDelayLine;
     juce::dsp::StateVariableTPTFilter<float> lowCutFilter, highCutFilter;
-    juce::SmoothedValue<float> delaySamples, feedback, mix, freezeAmount, pingPongAmount, widthSamples;
+    juce::SmoothedValue<float> delaySamples, feedback, mix, freezeAmount, pingPongAmount, widthSamples, inputSend;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> lowCutHz { 20.0f }, highCutHz { 20000.0f };
     bool lowCutOn = false, highCutOn = false, filtersInLoop = true;
-    int delaySmoothingSamples = -1;
+    int delaySmoothingSamples = -1, freezeFadeSamples = -1;
     double sampleRate = 44100.0;
     float maxDelaySamples = 1.0f, maxWidthSamples = 0.0f;
 };

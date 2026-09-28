@@ -4,11 +4,13 @@
 #include "DelayEngine.h"
 #include "PresetManager.h"
 
-class EchoFactoryProcessor : public juce::AudioProcessor
+class EchoFactoryProcessor : public juce::AudioProcessor,
+                             private juce::AudioProcessorValueTreeState::Listener,
+                             private juce::Timer
 {
 public:
     EchoFactoryProcessor();
-    ~EchoFactoryProcessor() override = default;
+    ~EchoFactoryProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -42,7 +44,19 @@ public:
     juce::AudioProcessorValueTreeState apvts;
     PresetManager presetManager { apvts };
 
+    /** Releases every gesture and latch, including Freeze. Message thread only. */
+    void resetPerformance();
+
+    /** Called on the message thread after any reset, including one from the host or MIDI. */
+    std::function<void()> onPerformanceReset;
+
 private:
+    // The Reset parameter can be set from any thread, so it only raises a flag
+    // that the timer handles on the message thread.
+    void parameterChanged (const juce::String& parameterID, float newValue) override;
+    void timerCallback() override;
+    std::atomic<bool> resetRequested { false };
+
     float getTargetDelayMs() const;
     void updateEngineParameters();
 
@@ -60,6 +74,10 @@ private:
     std::atomic<float>* freezeParam       = nullptr;
     std::atomic<float>* pingPongParam     = nullptr;
     std::atomic<float>* widthParam        = nullptr;
+    std::atomic<float>* throwParam        = nullptr;
+    std::atomic<float>* inputModeParam    = nullptr;
+    std::atomic<float>* throwLevelParam   = nullptr;
+    std::atomic<float>* freezeFadeParam   = nullptr;
 
     double hostBpm = 120.0;
 
