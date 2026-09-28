@@ -27,7 +27,7 @@ public:
     bool acceptsMidi() const override  { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 5.0; }
+    double getTailLengthSeconds() const override { return 10.1; } // two max-length ping-pong repeats + width
 
     // One host-visible program; presets are handled by PresetManager.
     int getNumPrograms() override                             { return 1; }
@@ -58,6 +58,8 @@ private:
     std::atomic<float>* highCutParam      = nullptr;
     std::atomic<float>* filterPosParam    = nullptr;
     std::atomic<float>* freezeParam       = nullptr;
+    std::atomic<float>* pingPongParam     = nullptr;
+    std::atomic<float>* widthParam        = nullptr;
 
     double hostBpm = 120.0;
 

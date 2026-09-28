@@ -16,6 +16,8 @@ namespace Params
         inline const juce::ParameterID highCut      { "highCut",      1 };
         inline const juce::ParameterID filterPos    { "filterPos",    1 };
         inline const juce::ParameterID freeze       { "freeze",       1 };
+        inline const juce::ParameterID pingPong     { "pingPong",     1 };
+        inline const juce::ParameterID stereoWidthMs { "stereoWidthMs", 1 };
     }
 
     constexpr float minDelayMs = 1.0f;
@@ -24,6 +26,9 @@ namespace Params
     // How long the delay time takes to glide to a new value.
     constexpr float maxTimeSmoothingMs     = 2000.0f;
     constexpr float defaultTimeSmoothingMs = 50.0f;
+
+    // Extra delay on the right channel of the echoes.
+    constexpr float maxStereoWidthMs = 100.0f;
 
     // At these extremes the filter is bypassed and reads as "Off".
     constexpr float lowCutMinHz  = 20.0f;

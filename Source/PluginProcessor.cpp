@@ -18,6 +18,8 @@ EchoFactoryProcessor::EchoFactoryProcessor()
     highCutParam      = apvts.getRawParameterValue (Params::ID::highCut.getParamID());
     filterPosParam    = apvts.getRawParameterValue (Params::ID::filterPos.getParamID());
     freezeParam       = apvts.getRawParameterValue (Params::ID::freeze.getParamID());
+    pingPongParam     = apvts.getRawParameterValue (Params::ID::pingPong.getParamID());
+    widthParam        = apvts.getRawParameterValue (Params::ID::stereoWidthMs.getParamID());
 }
 
 bool EchoFactoryProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -32,7 +34,7 @@ bool EchoFactoryProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
 
 void EchoFactoryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels(), Params::maxDelayMs);
+    engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels(), Params::maxDelayMs, Params::maxStereoWidthMs);
     updateEngineParameters();
     engine.reset(); // jump straight to the current settings, no glide on start-up
 }
@@ -68,6 +70,8 @@ void EchoFactoryProcessor::updateEngineParameters()
     engine.setHighCutHz (highCut >= Params::highCutMaxHz ? 0.0f : highCut);
     engine.setFiltersInFeedbackLoop (juce::roundToInt (filterPosParam->load()) == (int) Params::FilterPosition::inFeedbackLoop);
     engine.setFrozen (freezeParam->load() >= 0.5f);
+    engine.setPingPong (pingPongParam->load() >= 0.5f);
+    engine.setStereoWidthMs (widthParam->load());
 }
 
 void EchoFactoryProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)

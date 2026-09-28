@@ -154,6 +154,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         AudioParameterBoolAttributes()
             .withStringFromValueFunction ([] (bool v, int) { return v ? String ("On") : String ("Off"); })));
 
+    layout.add (std::make_unique<AudioParameterBool> (
+        ID::pingPong, "Ping-Pong", false,
+        AudioParameterBoolAttributes()
+            .withStringFromValueFunction ([] (bool v, int) { return v ? String ("On") : String ("Off"); })));
+
+    NormalisableRange<float> widthRange { 0.0f, maxStereoWidthMs, 1.0f };
+    widthRange.setSkewForCentre (20.0f);
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::stereoWidthMs, "Stereo Width", widthRange, 0.0f, millisecondAttributes()));
+
     return layout;
 }
 }
