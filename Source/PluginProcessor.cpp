@@ -13,6 +13,9 @@ EchoFactoryProcessor::EchoFactoryProcessor()
     syncDivisionParam = apvts.getRawParameterValue (Params::ID::syncDivision.getParamID());
     feedbackParam     = apvts.getRawParameterValue (Params::ID::feedback.getParamID());
     mixParam          = apvts.getRawParameterValue (Params::ID::mix.getParamID());
+    lowCutParam       = apvts.getRawParameterValue (Params::ID::lowCut.getParamID());
+    highCutParam      = apvts.getRawParameterValue (Params::ID::highCut.getParamID());
+    filterPosParam    = apvts.getRawParameterValue (Params::ID::filterPos.getParamID());
 }
 
 bool EchoFactoryProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -28,9 +31,7 @@ bool EchoFactoryProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
 void EchoFactoryProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels(), Params::maxDelayMs);
-    engine.setDelayMs (getTargetDelayMs());
-    engine.setFeedback (feedbackParam->load() * 0.01f);
-    engine.setMix (mixParam->load() * 0.01f);
+    updateEngineParameters();
     engine.reset(); // jump straight to the current settings, no glide on start-up
 }
 
@@ -51,6 +52,20 @@ float EchoFactoryProcessor::getTargetDelayMs() const
     return juce::jlimit (Params::minDelayMs, Params::maxDelayMs, (float) ms);
 }
 
+void EchoFactoryProcessor::updateEngineParameters()
+{
+    engine.setDelayMs (getTargetDelayMs());
+    engine.setFeedback (feedbackParam->load() * 0.01f);
+    engine.setMix (mixParam->load() * 0.01f);
+
+    // The range extremes mean "Off" (0 bypasses the filter).
+    const auto lowCut  = lowCutParam->load();
+    const auto highCut = highCutParam->load();
+    engine.setLowCutHz  (lowCut  <= Params::lowCutMinHz  ? 0.0f : lowCut);
+    engine.setHighCutHz (highCut >= Params::highCutMaxHz ? 0.0f : highCut);
+    engine.setFiltersInFeedbackLoop (juce::roundToInt (filterPosParam->load()) == (int) Params::FilterPosition::inFeedbackLoop);
+}
+
 void EchoFactoryProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -63,9 +78,7 @@ void EchoFactoryProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             if (auto bpm = position->getBpm(); bpm.hasValue() && *bpm > 0.0)
                 hostBpm = *bpm;
 
-    engine.setDelayMs (getTargetDelayMs());
-    engine.setFeedback (feedbackParam->load() * 0.01f);
-    engine.setMix (mixParam->load() * 0.01f);
+    updateEngineParameters();
     engine.process (buffer);
 }
 

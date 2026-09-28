@@ -59,12 +59,37 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     mixSlider.setExplicitFocusOrder (5);
     mixAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::mix.getParamID(), mixSlider);
 
+    // ---- Filters ---------------------------------------------------------
+    setupFrequencySlider (lowCutSlider, lowCutLabel, "Low Cut",
+                          "High-pass filter on the echoes, off or 21 hertz to 2 kilohertz. Turn fully down for off.",
+                          Params::lowCutMinHz);
+    lowCutSlider.setExplicitFocusOrder (6);
+    lowCutAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::lowCut.getParamID(), lowCutSlider);
+
+    setupFrequencySlider (highCutSlider, highCutLabel, "High Cut",
+                          "Low-pass filter on the echoes, 500 hertz to 20 kilohertz or off. Turn fully up for off.",
+                          Params::highCutMaxHz);
+    highCutSlider.setExplicitFocusOrder (7);
+    highCutAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::highCut.getParamID(), highCutSlider);
+
+    filterPosLabel.setText ("Filter Position", juce::dontSendNotification);
+    filterPosLabel.setJustificationType (juce::Justification::centred);
+    filterPosLabel.attachToComponent (&filterPosBox, false);
+    filterPosBox.addItemList (Params::getFilterPositionNames(), 1);
+    filterPosBox.setTitle ("Filter Position");
+    filterPosBox.setDescription ("In Feedback Loop filters every repeat, so echoes get progressively darker or thinner. "
+                                 "Output Only filters the echoes once, without changing the feedback.");
+    filterPosBox.setWantsKeyboardFocus (true);
+    filterPosBox.setExplicitFocusOrder (8);
+    addAndMakeVisible (filterPosBox);
+    filterPosAttachment = std::make_unique<ComboBoxAttachment> (p.apvts, Params::ID::filterPos.getParamID(), filterPosBox);
+
     p.apvts.state.addListener (this);
     juce::Desktop::getInstance().addFocusChangeListener (this);
 
     setWantsKeyboardFocus (false);
     setResizable (false, false);
-    setSize (520, 300);
+    setSize (520, 500);
 }
 
 EchoFactoryEditor::~EchoFactoryEditor()
@@ -77,8 +102,8 @@ EchoFactoryEditor::~EchoFactoryEditor()
         saveDialog->exitModalState (0);
 }
 
-void EchoFactoryEditor::setupPercentSlider (AccessibleSlider& slider, juce::Label& label,
-                                           const juce::String& name, const juce::String& description)
+void EchoFactoryEditor::setupSlider (AccessibleSlider& slider, juce::Label& label,
+                                    const juce::String& name, const juce::String& description)
 {
     label.setText (name, juce::dontSendNotification);
     label.setJustificationType (juce::Justification::centred);
@@ -87,8 +112,21 @@ void EchoFactoryEditor::setupPercentSlider (AccessibleSlider& slider, juce::Labe
     slider.setTitle (name);
     slider.setDescription (description);
     slider.setNumKeyboardSteps (100);
-    slider.spokenTextFromValue = [] (double v) { return juce::String (juce::roundToInt (v)) + " percent"; };
     addAndMakeVisible (slider);
+}
+
+void EchoFactoryEditor::setupPercentSlider (AccessibleSlider& slider, juce::Label& label,
+                                           const juce::String& name, const juce::String& description)
+{
+    setupSlider (slider, label, name, description);
+    slider.spokenTextFromValue = [] (double v) { return juce::String (juce::roundToInt (v)) + " percent"; };
+}
+
+void EchoFactoryEditor::setupFrequencySlider (AccessibleSlider& slider, juce::Label& label, const juce::String& name,
+                                             const juce::String& description, float offHz)
+{
+    setupSlider (slider, label, name, description);
+    slider.spokenTextFromValue = [offHz] (double v) { return Params::formatFrequency ((float) v, offHz, true); };
 }
 
 void EchoFactoryEditor::updateTimeControlForSync (bool synced)
@@ -163,7 +201,9 @@ void EchoFactoryEditor::showSaveDialog()
 void EchoFactoryEditor::setMainControlsVisible (bool shouldBeVisible)
 {
     for (auto* c : std::initializer_list<juce::Component*> { &presetBar, &timeSlider, &syncButton, &feedbackSlider, &mixSlider,
-                                                            &timeLabel, &feedbackLabel, &mixLabel })
+                                                            &timeLabel, &feedbackLabel, &mixLabel,
+                                                            &lowCutSlider, &highCutSlider, &filterPosBox,
+                                                            &lowCutLabel, &highCutLabel, &filterPosLabel })
         c->setVisible (shouldBeVisible);
 }
 
@@ -198,6 +238,11 @@ void EchoFactoryEditor::paint (juce::Graphics& g)
     g.setColour (Colours::text);
     g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
     g.drawText ("ECHO FACTORY", getLocalBounds().removeFromTop (48).reduced (16, 0), juce::Justification::centredLeft);
+
+    // Divider between the delay row and the filter row.
+    const auto dividerY = (float) lowCutLabel.getY() - 10.0f;
+    g.setColour (Colours::topBar);
+    g.drawLine (16.0f, dividerY, (float) getWidth() - 16.0f, dividerY, 1.5f);
 }
 
 void EchoFactoryEditor::paintOverChildren (juce::Graphics& g)
@@ -225,16 +270,20 @@ void EchoFactoryEditor::resized()
     presetBar.setBounds (top);
 
     area.reduce (16, 16);
-    area.removeFromTop (24); // room for the labels attached above the sliders
 
-    const auto columnWidth = area.getWidth() / 4;
+    // Row 1: delay controls
+    auto row1 = area.removeFromTop (area.getHeight() / 2).withTrimmedTop (24).withTrimmedBottom (8); // top: room for labels
+    const auto columnWidth = row1.getWidth() / 4;
 
-    auto timeColumn = area.removeFromLeft (columnWidth);
-    timeSlider.setBounds (timeColumn.reduced (6, 0));
+    timeSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
+    syncButton.setBounds (row1.removeFromLeft (columnWidth).withSizeKeepingCentre (columnWidth - 12, 32));
+    feedbackSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
+    mixSlider.setBounds (row1.reduced (6, 0));
 
-    auto syncColumn = area.removeFromLeft (columnWidth);
-    syncButton.setBounds (syncColumn.withSizeKeepingCentre (columnWidth - 12, 32));
+    // Row 2: filters
+    auto row2 = area.withTrimmedTop (32).withTrimmedBottom (8); // separator line + labels
 
-    feedbackSlider.setBounds (area.removeFromLeft (columnWidth).reduced (6, 0));
-    mixSlider.setBounds (area.reduced (6, 0));
+    lowCutSlider.setBounds (row2.removeFromLeft (columnWidth).reduced (6, 0));
+    highCutSlider.setBounds (row2.removeFromLeft (columnWidth).reduced (6, 0));
+    filterPosBox.setBounds (row2.withSizeKeepingCentre (juce::jmin (row2.getWidth() - 12, 200), 30));
 }

@@ -22,8 +22,11 @@ public:
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    void setupSlider (AccessibleSlider&, juce::Label&, const juce::String& name, const juce::String& description);
     void setupPercentSlider (AccessibleSlider&, juce::Label&, const juce::String& name, const juce::String& description);
+    void setupFrequencySlider (AccessibleSlider&, juce::Label&, const juce::String& name, const juce::String& description, float offHz);
     void updateTimeControlForSync (bool synced);
     void showSaveDialog();
     void setMainControlsVisible (bool);
@@ -44,8 +47,14 @@ private:
     juce::Label timeLabel, feedbackLabel, mixLabel;
     juce::ToggleButton syncButton { "Sync to host tempo" };
 
+    AccessibleSlider lowCutSlider, highCutSlider;
+    juce::Label lowCutLabel, highCutLabel, filterPosLabel;
+    juce::ComboBox filterPosBox;
+
     std::unique_ptr<SliderAttachment> timeAttachment, feedbackAttachment, mixAttachment;
+    std::unique_ptr<SliderAttachment> lowCutAttachment, highCutAttachment;
     std::unique_ptr<ButtonAttachment> syncButtonAttachment;
+    std::unique_ptr<ComboBoxAttachment> filterPosAttachment;
     std::unique_ptr<juce::ParameterAttachment> syncWatcher;
     bool showingSyncDivisions = false;
 

@@ -40,6 +40,26 @@ juce::String formatMilliseconds (float ms, bool spoken)
     return spoken ? value + (value == "1" ? " millisecond" : " milliseconds") : value + " ms";
 }
 
+const juce::StringArray& getFilterPositionNames()
+{
+    static const juce::StringArray names { "In Feedback Loop", "Output Only" };
+    return names;
+}
+
+juce::String formatFrequency (float hz, float offHz, bool spoken)
+{
+    if (juce::approximatelyEqual (hz, offHz))
+        return "Off";
+
+    if (hz >= 1000.0f)
+    {
+        const auto khz = juce::String (hz / 1000.0f, hz >= 10000.0f ? 1 : 2);
+        return khz + (spoken ? " kilohertz" : " kHz");
+    }
+
+    return juce::String (juce::roundToInt (hz)) + (spoken ? " hertz" : " Hz");
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
     using namespace juce;
@@ -86,6 +106,38 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ID::mix, "Mix", NormalisableRange<float> { 0.0f, 100.0f, 0.1f }, 30.0f, percentAttributes()));
+
+    auto frequencyAttributes = [] (float offHz)
+    {
+        return AudioParameterFloatAttributes()
+            .withLabel ("Hz")
+            .withStringFromValueFunction ([offHz] (float v, int) { return formatFrequency (v, offHz, false); })
+            .withValueFromStringFunction ([offHz] (const String& text)
+            {
+                const auto t = text.trim().toLowerCase();
+
+                if (t == "off")
+                    return offHz;
+
+                const auto number = t.getFloatValue();
+                return t.contains ("k") ? number * 1000.0f : number;
+            });
+    };
+
+    NormalisableRange<float> lowCutRange { lowCutMinHz, lowCutMaxHz, 1.0f };
+    lowCutRange.setSkewForCentre (200.0f);
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::lowCut, "Low Cut", lowCutRange, lowCutMinHz, frequencyAttributes (lowCutMinHz)));
+
+    NormalisableRange<float> highCutRange { highCutMinHz, highCutMaxHz, 1.0f };
+    highCutRange.setSkewForCentre (3000.0f);
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::highCut, "High Cut", highCutRange, highCutMaxHz, frequencyAttributes (highCutMaxHz)));
+
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ID::filterPos, "Filter Position", getFilterPositionNames(), (int) FilterPosition::inFeedbackLoop));
 
     return layout;
 }

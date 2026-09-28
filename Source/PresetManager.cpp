@@ -52,7 +52,25 @@ bool PresetManager::applyState (const juce::ValueTree& newState, const juce::Str
     if (! newState.hasType (apvts.state.getType()))
         return false;
 
-    apvts.replaceState (newState.createCopy());
+    auto stateToLoad = newState.createCopy();
+
+    // Presets saved before a parameter existed would otherwise leave it at
+    // whatever value it currently has; reset those to their defaults instead.
+    for (auto* p : apvts.processor.getParameters())
+    {
+        if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (p))
+        {
+            if (! stateToLoad.getChildWithProperty ("id", ranged->getParameterID()).isValid())
+            {
+                juce::ValueTree child ("PARAM");
+                child.setProperty ("id", ranged->getParameterID(), nullptr);
+                child.setProperty ("value", ranged->convertFrom0to1 (ranged->getDefaultValue()), nullptr);
+                stateToLoad.appendChild (child, nullptr);
+            }
+        }
+    }
+
+    apvts.replaceState (stateToLoad);
     setCurrentPresetName (name);
     return true;
 }

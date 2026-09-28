@@ -44,6 +44,7 @@ public:
 
 private:
     float getTargetDelayMs() const;
+    void updateEngineParameters();
 
     DelayEngine engine;
 
@@ -52,6 +53,9 @@ private:
     std::atomic<float>* syncDivisionParam = nullptr;
     std::atomic<float>* feedbackParam     = nullptr;
     std::atomic<float>* mixParam          = nullptr;
+    std::atomic<float>* lowCutParam       = nullptr;
+    std::atomic<float>* highCutParam      = nullptr;
+    std::atomic<float>* filterPosParam    = nullptr;
 
     double hostBpm = 120.0;
 
