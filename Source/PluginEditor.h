@@ -24,7 +24,7 @@ private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     void setupPercentSlider (AccessibleSlider&, juce::Label&, const juce::String& name, const juce::String& description);
-    void updateTimeControlForSync();
+    void updateTimeControlForSync (bool synced);
     void showSaveDialog();
     void setMainControlsVisible (bool);
 

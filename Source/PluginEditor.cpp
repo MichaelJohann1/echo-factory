@@ -47,7 +47,7 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     // Follows the sync parameter whether it's changed here, by automation or by a preset.
     syncWatcher = std::make_unique<juce::ParameterAttachment> (
         *p.apvts.getParameter (Params::ID::sync.getParamID()),
-        [this] (float) { updateTimeControlForSync(); });
+        [this] (float value) { updateTimeControlForSync (value >= 0.5f); });
     syncWatcher->sendInitialUpdate();
 
     // ---- Feedback / Mix --------------------------------------------------
@@ -91,10 +91,8 @@ void EchoFactoryEditor::setupPercentSlider (AccessibleSlider& slider, juce::Labe
     addAndMakeVisible (slider);
 }
 
-void EchoFactoryEditor::updateTimeControlForSync()
+void EchoFactoryEditor::updateTimeControlForSync (bool synced)
 {
-    const auto synced = processorRef.apvts.getRawParameterValue (Params::ID::sync.getParamID())->load() >= 0.5f;
-
     if (timeAttachment != nullptr && synced == showingSyncDivisions)
         return;
 
