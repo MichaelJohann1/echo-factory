@@ -35,9 +35,13 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     performPad.setTitle ("Perform mode");
     performPad.setDescription ("Hold F to throw, D to freeze, S for tapestop, A for runaway, G for reverse. "
                                "Shift plus a key latches it; press the key again to release. "
+                               "Up and down arrows change feedback, left and right arrows change delay time. "
                                "Backspace resets. Escape returns to the controls.");
     performPad.setExplicitFocusOrder (2);
     performPad.onReset = [this] { processorRef.resetPerformance(); };
+    performPad.onNudgeFeedback = [this] (float delta) { processorRef.nudgeFeedback (delta); };
+    performPad.onNudgeTime     = [this] (int direction) { processorRef.nudgeDelayTime (direction); };
+    performPad.isHeldExternally = [this] (const juce::String& id) { return processorRef.isGestureHeldByMidi (id); };
     performPad.onExit  = [this]
     {
         juce::AccessibilityHandler::postAnnouncement ("Edit mode", juce::AccessibilityHandler::AnnouncementPriority::high);
@@ -161,7 +165,8 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     freezeFadeAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::freezeFadeMs.getParamID(), freezeFadeSlider);
 
     resetButton.setTitle ("Reset");
-    resetButton.setDescription ("Releases every gesture and latch, including Freeze.");
+    resetButton.setDescription ("Releases every gesture and latch, including Freeze, and undoes "
+                                "feedback and delay time changes made with the arrow keys in Perform mode.");
     resetButton.setWantsKeyboardFocus (true);
     resetButton.setExplicitFocusOrder (17);
     resetButton.onClick = [this] { processorRef.resetPerformance(); };
@@ -171,6 +176,12 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     p.onPerformanceReset = []
     {
         juce::AccessibilityHandler::postAnnouncement ("Reset", juce::AccessibilityHandler::AnnouncementPriority::high);
+    };
+
+    p.onGestureLatched = [] (const juce::String& name, bool isOn)
+    {
+        juce::AccessibilityHandler::postAnnouncement (name + (isOn ? " latched" : " released"),
+                                                      juce::AccessibilityHandler::AnnouncementPriority::high);
     };
 
     p.apvts.state.addListener (this);
@@ -184,6 +195,7 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
 EchoFactoryEditor::~EchoFactoryEditor()
 {
     processorRef.onPerformanceReset = nullptr;
+    processorRef.onGestureLatched = nullptr;
     juce::Desktop::getInstance().removeFocusChangeListener (this);
     processorRef.apvts.state.removeListener (this);
     cancelPendingUpdate();

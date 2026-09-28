@@ -26,6 +26,7 @@ cmake --build build -j 10
 - `COPY_PLUGIN_AFTER_BUILD` installs the AU and VST3 into `~/Library/Audio/Plug-Ins`.
 - The Standalone app is at `build/EchoFactory_artefacts/Debug/Standalone/Echo Factory.app`.
 - The Standalone app has no host tempo, so tempo sync falls back to 120 BPM there.
+- The Standalone app needs `MICROPHONE_PERMISSION_ENABLED`, because otherwise macOS silently gives it zero input. It's ad-hoc signed, so macOS may ask for mic access again after a rebuild.
 - There are no unit tests. Validation is:
   - **Warnings:** the build should produce none from `Source/`. JUCE's recommended warning flags are on.
   - **AU:** run `killall -9 AudioComponentRegistrar; auval -v aufx Ecfy Zbau`.
@@ -48,6 +49,9 @@ cmake --build build -j 10
   - Each gesture (Throw, Freeze, Tapestop, Runaway, Reverse) is a bool parameter. Held versus latched only exists in the UI and MIDI layers.
   - Throw is applied through `DelayEngine::setInputSend`. The processor sends Throw Level while throwing, and otherwise unity, or 0 in Throw Only mode.
   - The Reset parameter can change on any thread, so it only sets a flag. The processor's timer then calls `resetPerformance()` on the message thread, which fires `onPerformanceReset` so the editor can announce it.
+  - MIDI uses a fixed map (no MIDI learn). On the audio thread, `handleMidi` only records events. Held notes and the sustain pedal act immediately: the engine sees a gesture as on if its parameter is on or MIDI holds it. Latch notes, Reset and CCs set flags or pending values, and the timer applies them to parameters on the message thread.
+  - The AU is pinned to `aufx` even though it accepts MIDI, so it doesn't break sessions. auval warns about this, which is expected.
+  - Perform-mode arrow keys go through `nudgeFeedback` and `nudgeDelayTime`, which remember the value before the first nudge so Reset can restore it.
   - `ui/PerformPad` is the focusable keyboard surface. It tracks physical keys to ignore auto-repeat, and releases held gestures when it loses focus.
 - **State and presets:**
   - All state is the APVTS `ValueTree`, and the current preset name is stored as a property on it (`presetName`).

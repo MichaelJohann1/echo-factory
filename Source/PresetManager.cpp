@@ -1,4 +1,5 @@
 #include "PresetManager.h"
+#include "Parameters.h"
 
 PresetManager::PresetManager (juce::AudioProcessorValueTreeState& state)
     : apvts (state)
@@ -69,6 +70,11 @@ bool PresetManager::applyState (const juce::ValueTree& newState, const juce::Str
             }
         }
     }
+
+    // Presets never load mid-gesture: a preset saved while frozen or throwing
+    // would otherwise come back latched. Host sessions still restore as saved.
+    for (const auto* id : Params::getGestureIDs())
+        stateToLoad.getChildWithProperty ("id", id->getParamID()).setProperty ("value", 0.0f, nullptr);
 
     apvts.replaceState (stateToLoad);
     setCurrentPresetName (name);

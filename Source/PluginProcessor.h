@@ -26,7 +26,7 @@ public:
 
     const juce::String getName() const override { return JucePlugin_Name; }
 
-    bool acceptsMidi() const override  { return false; }
+    bool acceptsMidi() const override  { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 10.1; } // two max-length ping-pong repeats + width
@@ -50,12 +50,38 @@ public:
     /** Called on the message thread after any reset, including one from the host or MIDI. */
     std::function<void()> onPerformanceReset;
 
+    /** Called on the message thread when a MIDI latch note toggles a gesture. */
+    std::function<void (const juce::String& gestureName, bool isOn)> onGestureLatched;
+
+    /** Perform-mode arrow keys. Message thread only; Reset undoes them. */
+    void nudgeFeedback (float deltaPercent);
+    void nudgeDelayTime (int direction);
+
+    /** True while a MIDI note or the sustain pedal holds this gesture. */
+    bool isGestureHeldByMidi (const juce::String& paramID) const;
+
 private:
     // The Reset parameter can be set from any thread, so it only raises a flag
     // that the timer handles on the message thread.
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     void timerCallback() override;
     std::atomic<bool> resetRequested { false };
+
+    // ---- MIDI (fixed map, see docs/perform-map.md) ---------------------------
+    // The audio thread only records what arrived; held notes act immediately,
+    // while latches and CCs change parameters from the timer on the message thread.
+    static constexpr int numGestures = 5;
+    void handleMidi (const juce::MidiBuffer&);
+    bool isGestureOn (int index) const;
+
+    std::array<std::atomic<float>*, numGestures> gestureParams {};
+    std::array<std::atomic<bool>, numGestures> midiNoteHeld {};
+    std::atomic<bool> sustainHeld { false };
+    std::atomic<juce::uint32> latchRequests { 0 };
+    std::array<std::atomic<float>, 128> pendingCC; // normalised value, or -1 for none
+
+    // Values from before the first arrow-key nudge, restored by Reset.
+    std::optional<float> feedbackBaseline, delayTimeBaseline, syncDivisionBaseline;
 
     float getTargetDelayMs() const;
     void updateEngineParameters();
@@ -71,10 +97,8 @@ private:
     std::atomic<float>* lowCutParam       = nullptr;
     std::atomic<float>* highCutParam      = nullptr;
     std::atomic<float>* filterPosParam    = nullptr;
-    std::atomic<float>* freezeParam       = nullptr;
     std::atomic<float>* pingPongParam     = nullptr;
     std::atomic<float>* widthParam        = nullptr;
-    std::atomic<float>* throwParam        = nullptr;
     std::atomic<float>* inputModeParam    = nullptr;
     std::atomic<float>* throwLevelParam   = nullptr;
     std::atomic<float>* freezeFadeParam   = nullptr;

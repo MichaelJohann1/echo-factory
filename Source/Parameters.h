@@ -30,6 +30,9 @@ namespace Params
         inline const juce::ParameterID freezeFadeMs { "freezeFadeMs", 1 };
     }
 
+    /** The performance gestures, in MIDI note order (Throw, Freeze, Tapestop, Runaway, Reverse). */
+    const std::array<const juce::ParameterID*, 5>& getGestureIDs();
+
     constexpr float minDelayMs = 1.0f;
     constexpr float maxDelayMs = 5000.0f;
 

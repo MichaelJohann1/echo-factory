@@ -73,6 +73,22 @@ bool PerformPad::keyPressed (const juce::KeyPress& key)
     if (mods.isCommandDown() || mods.isCtrlDown() || mods.isAltDown())
         return false;
 
+    if (code == juce::KeyPress::upKey || code == juce::KeyPress::downKey)
+    {
+        if (onNudgeFeedback != nullptr)
+            onNudgeFeedback ((code == juce::KeyPress::upKey ? 1.0f : -1.0f) * (mods.isShiftDown() ? 1.0f : 5.0f));
+
+        return true;
+    }
+
+    if (code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey)
+    {
+        if (onNudgeTime != nullptr)
+            onNudgeTime (code == juce::KeyPress::rightKey ? 1 : -1);
+
+        return true;
+    }
+
     const auto upper = juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) code);
 
     for (auto& g : gestures)
@@ -200,13 +216,18 @@ void PerformPad::timerCallback()
 
     for (auto& g : gestures)
     {
-        const auto on = isOn (g);
+        const auto on = isShownOn (g);
         changed = changed || on != g.shownOn;
         g.shownOn = on;
     }
 
     if (changed)
         repaint();
+}
+
+bool PerformPad::isShownOn (const Gesture& g) const
+{
+    return isOn (g) || (isHeldExternally != nullptr && isHeldExternally (g.param->getParameterID()));
 }
 
 void PerformPad::paint (juce::Graphics& g)

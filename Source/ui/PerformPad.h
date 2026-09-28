@@ -9,6 +9,7 @@
     - Hold a key: the gesture is on while held. Not announced; the sound is the feedback.
     - Shift + key: toggles a latch, announced ("Freeze latched" / "Freeze released").
     - Plain key on a latched gesture: releases it when the key comes up, announced.
+    - Up/Down: onNudgeFeedback (5%, Shift 1%). Left/Right: onNudgeTime (one step). Silent.
     - Backspace: onReset. Escape: onExit.
     - Losing focus releases every held gesture so nothing sticks on.
 
@@ -23,6 +24,11 @@ public:
 
     std::function<void()> onReset;
     std::function<void()> onExit;
+    std::function<void (float deltaPercent)> onNudgeFeedback;
+    std::function<void (int direction)> onNudgeTime;
+
+    /** Lets the pad also light gestures held from elsewhere, e.g. MIDI. */
+    std::function<bool (const juce::String& paramID)> isHeldExternally;
 
     void paint (juce::Graphics&) override;
     bool keyPressed (const juce::KeyPress&) override;
@@ -45,6 +51,7 @@ private:
     };
 
     static bool isOn (const Gesture& g) { return g.param->getValue() >= 0.5f; }
+    bool isShownOn (const Gesture&) const;
     static void setOn (Gesture&, bool shouldBeOn);
     void releaseAllHeld();
     Gesture* gestureAt (juce::Point<int>);

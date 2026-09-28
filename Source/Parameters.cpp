@@ -26,6 +26,14 @@ const std::vector<SyncDivision>& getSyncDivisions()
     return divisions;
 }
 
+const std::array<const juce::ParameterID*, 5>& getGestureIDs()
+{
+    static const std::array<const juce::ParameterID*, 5> ids {
+        &ID::throwGesture, &ID::freeze, &ID::tapestop, &ID::runaway, &ID::reverse
+    };
+    return ids;
+}
+
 int getDefaultSyncDivisionIndex() { return 7; } // 1/8 note
 
 juce::String formatMilliseconds (float ms, bool spoken)

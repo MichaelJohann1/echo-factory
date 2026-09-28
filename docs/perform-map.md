@@ -20,7 +20,9 @@ and the fixed MIDI map. Change it here first, then in code.
 | Runaway   | Feedback above 100% into the Wear saturator. | Runaway Drive |
 | Reverse   | Echoes play backwards, one delay time per segment. | — |
 
-Reset releases every gesture and latch, including Freeze.
+Reset releases every gesture and latch, including Freeze and MIDI-held notes,
+and undoes feedback and delay time changes made with the Perform-mode arrow keys.
+Loading a preset always turns every gesture off; host sessions restore as saved.
 
 ## Perform mode (computer keyboard)
 
@@ -37,8 +39,8 @@ key with the tactile bump, so they can be found by touch.
 | G | Reverse | left index, reach right |
 | Backspace | Reset | right hand |
 | Escape | Leave Perform mode (focus moves to the controls) | |
-| ↑ / ↓ | Feedback ±5% (Shift ±1%) — *stage 2* | right hand |
-| ← / → | Delay time one division or step down/up — *stage 2* | right hand |
+| ↑ / ↓ | Feedback ±5% (Shift ±1%), silent | right hand |
+| ← / → | Delay time one division (synced) or 1/100 of the range, silent | right hand |
 
 - **Hold** a key: the gesture is on while held.
 - **Shift + key**: toggles a latch (announced).
@@ -48,9 +50,11 @@ key with the tactile bump, so they can be found by touch.
 Deliberately unused: Space (Live's transport if the key isn't passed through),
 Ctrl-Option (VoiceOver modifier), number keys (often taken by Live).
 
-## Fixed MIDI map — *stage 2*
+## Fixed MIDI map
 
-Any channel. Note numbers are MIDI numbers; Live names 36 "C1", some hosts "C2".
+Any channel. The VST3 and Standalone receive MIDI. The AU stays type `aufx` so
+saved sessions keep loading, which means most AU hosts (Logic) won't send it MIDI.
+In Ableton, use the VST3 for MIDI. CC 23, 24, 31 and 85 arrive with their stages. Note numbers are MIDI numbers; Live names 36 "C1", some hosts "C2".
 Laid out for 4×4 pad controllers starting at 36.
 
 | Notes | Action |

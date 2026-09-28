@@ -24,7 +24,7 @@ juce_add_plugin(EchoFactory
     PRODUCT_NAME             "${EF_PRODUCT_NAME}"
     FORMATS                  AU VST3 Standalone
     IS_SYNTH                 FALSE
-    NEEDS_MIDI_INPUT         FALSE
+    NEEDS_MIDI_INPUT         TRUE   # AU stays aufx (AU_MAIN_TYPE), so sessions keep loading
     NEEDS_MIDI_OUTPUT        FALSE
     IS_MIDI_EFFECT           FALSE
     AU_MAIN_TYPE             kAudioUnitType_Effect
