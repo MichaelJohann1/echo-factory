@@ -1,5 +1,29 @@
 #include "DelayEngine.h"
 
+namespace
+{
+    // Wear
+    constexpr float wearMinCeiling   = 0.35f;  // saturator ceiling at full Wear
+    constexpr float darkestHz        = 4500.0f; // one-pole cutoff at full Wear
+    constexpr float maxWowMs         = 1.0f;
+    constexpr float maxFlutterMs     = 0.03f;
+    constexpr float wowHz            = 0.7f;
+    constexpr float flutterHz        = 7.3f;
+    constexpr float driftHz          = 0.5f;
+    constexpr float driftIntervalSec = 0.4f;
+
+    // Runaway: feedback from 110% (drive 0) to 160% (drive 1), ceiling from 0.5 down to 0.3.
+    constexpr float runawayMinFeedback = 1.1f,  runawayFeedbackRange = 0.5f;
+    constexpr float runawayMaxCeiling  = 0.5f,  runawayCeilingRange  = 0.2f;
+
+    constexpr float dcBlockHz = 5.0f;
+
+    float onePoleCoef (float hz, double sampleRate)
+    {
+        return 1.0f - std::exp (-juce::MathConstants<float>::twoPi * hz / (float) sampleRate);
+    }
+}
+
 void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChannels, float maxDelayMs, float maxWidthMs)
 {
     sampleRate = newSampleRate;
@@ -27,6 +51,15 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     freezeFadeSamples = -1;
     setFreezeFadeMs (20.0f);
     inputSend.reset (sampleRate, 0.01);
+    wear.reset (sampleRate, 0.05);
+    runawayAmount.reset (sampleRate, 0.08);
+    runawayDrive.reset (sampleRate, 0.05);
+
+    dcCoef      = onePoleCoef (dcBlockHz, sampleRate);
+    darkCoefMin = onePoleCoef (darkestHz, sampleRate);
+    driftCoef   = onePoleCoef (driftHz, sampleRate);
+    wowIncrement     = juce::MathConstants<float>::twoPi * wowHz / (float) sampleRate;
+    flutterIncrement = juce::MathConstants<float>::twoPi * flutterHz / (float) sampleRate;
     pingPongAmount.reset (sampleRate, 0.02);
     widthSamples.reset (sampleRate, 0.05);
 
@@ -49,6 +82,15 @@ void DelayEngine::reset()
     freezeAmount.setCurrentAndTargetValue (freezeAmount.getTargetValue());
     pingPongAmount.setCurrentAndTargetValue (pingPongAmount.getTargetValue());
     inputSend.setCurrentAndTargetValue (inputSend.getTargetValue());
+    wear.setCurrentAndTargetValue (wear.getTargetValue());
+    runawayAmount.setCurrentAndTargetValue (runawayAmount.getTargetValue());
+    runawayDrive.setCurrentAndTargetValue (runawayDrive.getTargetValue());
+
+    for (int ch = 0; ch < 2; ++ch)
+        dcState[ch] = darkState[ch] = 0.0f;
+
+    wowPhase = flutterPhase = drift = driftTarget = 0.0f;
+    driftCountdown = 0;
     widthSamples.setCurrentAndTargetValue (widthSamples.getTargetValue());
 }
 
@@ -126,6 +168,20 @@ float DelayEngine::filter (int channel, float sample)
     return highCutOn ? high : afterLow;
 }
 
+float DelayEngine::tape (int channel, float sample, float amount, float ceiling, float darken)
+{
+    dcState[channel] += dcCoef * (sample - dcState[channel]);
+    const auto blocked = sample - amount * dcState[channel];
+
+    const auto saturated = ceiling * std::tanh (blocked / ceiling);
+    const auto shaped = blocked + amount * (saturated - blocked);
+
+    // Coefficient 1 passes the sample straight through.
+    const auto coef = 1.0f - darken * (1.0f - darkCoefMin);
+    darkState[channel] += coef * (shaped - darkState[channel]);
+    return darkState[channel];
+}
+
 void DelayEngine::process (juce::AudioBuffer<float>& buffer)
 {
     const auto numChannels = buffer.getNumChannels();
@@ -135,15 +191,46 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
     for (int i = 0; i < numSamples; ++i)
     {
         const auto frozen = freezeAmount.getNextValue();
-        const auto fb  = feedback.getNextValue();
+        const auto wearNow = wear.getNextValue();
+        const auto runaway = runawayAmount.getNextValue();
+        const auto drive   = runawayDrive.getNextValue();
+
+        // Runaway takes feedback past 100% and the saturator fully in, which keeps
+        // the loop bounded at the ceiling. Ramping both together keeps it bounded
+        // on the way in too: the linear part of the loop gain stays below 1.
+        const auto fb = feedback.getNextValue() * (1.0f - runaway)
+                      + runaway * (runawayMinFeedback + runawayFeedbackRange * drive);
+        const auto tapeAmount = juce::jmax (wearNow, runaway);
+        const auto ceiling = (1.0f - (1.0f - wearMinCeiling) * wearNow) * (1.0f - runaway)
+                           + runaway * (runawayMaxCeiling - runawayCeilingRange * drive);
+        const auto darken = juce::jmax (wearNow, 0.5f * runaway);
         const auto wet = mix.getNextValue();
         const auto send = inputSend.getNextValue();
         const auto pingPong = isStereo ? pingPongAmount.getNextValue() : 0.0f;
         const auto width = widthSamples.getNextValue();
 
+        // Wow (slow, with random drift) and flutter (fast), faded out while frozen.
+        if (--driftCountdown <= 0)
+        {
+            driftTarget = random.nextFloat() * 2.0f - 1.0f;
+            driftCountdown = (int) (driftIntervalSec * sampleRate);
+        }
+
+        drift += driftCoef * (driftTarget - drift);
+        wowPhase += wowIncrement;
+        flutterPhase += flutterIncrement;
+        if (wowPhase >= juce::MathConstants<float>::twoPi)     wowPhase -= juce::MathConstants<float>::twoPi;
+        if (flutterPhase >= juce::MathConstants<float>::twoPi) flutterPhase -= juce::MathConstants<float>::twoPi;
+
+        const auto msToSamples = (float) (0.001 * sampleRate);
+        const auto wowDepth = wearNow * wearNow * maxWowMs * msToSamples;
+        const auto flutterDepth = wearNow * maxFlutterMs * msToSamples;
+        const auto modulation = (1.0f - frozen) * (wowDepth * (0.6f * std::sin (wowPhase) + 0.4f * drift)
+                                                   + flutterDepth * std::sin (flutterPhase));
+
         // Whole-sample delay while frozen: repeated fractional interpolation
         // would slowly dull the looping audio.
-        auto d = delaySamples.getNextValue();
+        auto d = juce::jlimit (1.0f, maxDelaySamples, delaySamples.getNextValue() + modulation);
         if (frozen > 0.0f)
             d = std::round (d);
 
@@ -159,7 +246,7 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
                 const auto delayed = delayLine.popSample (ch, d);
 
                 const auto echo = filter (ch, delayed);
-                const auto normalWrite = send * dry + fb * (filtersInLoop ? echo : delayed);
+                const auto normalWrite = tape (ch, send * dry + fb * (filtersInLoop ? echo : delayed), tapeAmount, ceiling, darken);
 
                 delayLine.pushSample (ch, normalWrite + frozen * (delayed - normalWrite));
 
@@ -188,7 +275,7 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
 
         for (int ch = 0; ch < 2; ++ch)
         {
-            const auto write = normalWrite[ch] + pingPong * (pingPongWrite[ch] - normalWrite[ch]);
+            const auto write = tape (ch, normalWrite[ch] + pingPong * (pingPongWrite[ch] - normalWrite[ch]), tapeAmount, ceiling, darken);
             delayLine.pushSample (ch, write + frozen * (frozenWrite[ch] - write));
         }
 

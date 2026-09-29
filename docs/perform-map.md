@@ -54,7 +54,7 @@ Ctrl-Option (VoiceOver modifier), number keys (often taken by Live).
 
 Any channel. The VST3 and Standalone receive MIDI. The AU stays type `aufx` so
 saved sessions keep loading, which means most AU hosts (Logic) won't send it MIDI.
-In Ableton, use the VST3 for MIDI. CC 23, 24, 31 and 85 arrive with their stages. Note numbers are MIDI numbers; Live names 36 "C1", some hosts "C2".
+In Ableton, use the VST3 for MIDI. CC 24 and 31 arrive with their stages. Note numbers are MIDI numbers; Live names 36 "C1", some hosts "C2".
 Laid out for 4×4 pad controllers starting at 36.
 
 | Notes | Action |

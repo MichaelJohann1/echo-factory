@@ -102,6 +102,8 @@ private:
     std::atomic<float>* inputModeParam    = nullptr;
     std::atomic<float>* throwLevelParam   = nullptr;
     std::atomic<float>* freezeFadeParam   = nullptr;
+    std::atomic<float>* runawayDriveParam = nullptr;
+    std::atomic<float>* wearParam         = nullptr;
 
     double hostBpm = 120.0;
 

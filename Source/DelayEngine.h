@@ -23,6 +23,15 @@
 
     Stereo width delays the right channel of the echoes by a few milliseconds,
     on the output only, so it doesn't build up in the feedback loop.
+
+    Wear adds tape character to the write path: a soft saturator with a
+    ceiling, gentle darkening on every pass, and wow and flutter on the delay
+    time. Each is crossfaded in by the Wear amount, so 0 is exactly the clean
+    delay. Wow and flutter fade out while frozen so the loop stays in time.
+
+    Runaway raises feedback above 100% and pushes the saturator fully in. The
+    saturator's ceiling keeps the loop bounded, and a DC blocker stops any
+    offset from building up.
 */
 class DelayEngine
 {
@@ -52,18 +61,34 @@ public:
     void setPingPong (bool shouldPingPong) { pingPongAmount.setTargetValue (shouldPingPong ? 1.0f : 0.0f); }
     void setStereoWidthMs (float ms);
 
+    void setWear (float amount01)          { wear.setTargetValue (juce::jlimit (0.0f, 1.0f, amount01)); }
+    void setRunaway (bool shouldRunAway)   { runawayAmount.setTargetValue (shouldRunAway ? 1.0f : 0.0f); }
+    void setRunawayDrive (float amount01)  { runawayDrive.setTargetValue (juce::jlimit (0.0f, 1.0f, amount01)); }
+
     void process (juce::AudioBuffer<float>& buffer);
 
 private:
     float filter (int channel, float sample);
 
+    /** DC blocking, saturation and darkening, each scaled so 0 leaves the sample untouched. */
+    float tape (int channel, float sample, float amount, float ceiling, float darken);
+
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> delayLine;
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> widthDelayLine;
     juce::dsp::StateVariableTPTFilter<float> lowCutFilter, highCutFilter;
     juce::SmoothedValue<float> delaySamples, feedback, mix, freezeAmount, pingPongAmount, widthSamples, inputSend;
+    juce::SmoothedValue<float> wear, runawayAmount, runawayDrive;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> lowCutHz { 20.0f }, highCutHz { 20000.0f };
     bool lowCutOn = false, highCutOn = false, filtersInLoop = true;
     int delaySmoothingSamples = -1, freezeFadeSamples = -1;
     double sampleRate = 44100.0;
     float maxDelaySamples = 1.0f, maxWidthSamples = 0.0f;
+
+    // Tape state
+    float dcState[2] {}, darkState[2] {};
+    float dcCoef = 0.0f, darkCoefMin = 1.0f;
+    float wowPhase = 0.0f, flutterPhase = 0.0f, wowIncrement = 0.0f, flutterIncrement = 0.0f;
+    float drift = 0.0f, driftTarget = 0.0f, driftCoef = 0.0f;
+    int driftCountdown = 0;
+    juce::Random random;
 };

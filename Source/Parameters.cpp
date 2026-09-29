@@ -227,6 +227,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (std::make_unique<AudioParameterFloat> (
         ID::freezeFadeMs, "Freeze Fade", freezeFadeRange, defaultFreezeFadeMs, millisecondAttributes()));
 
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::runawayDrive, "Runaway Drive", NormalisableRange<float> { 0.0f, 100.0f, 0.1f }, 50.0f, percentAttributes()));
+
+    // ---- Character -----------------------------------------------------------
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::wear, "Wear", NormalisableRange<float> { 0.0f, 100.0f, 0.1f }, 0.0f, percentAttributes()));
+
     return layout;
 }
 }

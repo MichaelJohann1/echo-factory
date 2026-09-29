@@ -28,6 +28,10 @@ namespace Params
         inline const juce::ParameterID inputMode    { "inputMode",    1 };
         inline const juce::ParameterID throwLevelDb { "throwLevelDb", 1 };
         inline const juce::ParameterID freezeFadeMs { "freezeFadeMs", 1 };
+        inline const juce::ParameterID runawayDrive { "runawayDrive", 1 };
+
+        // Character
+        inline const juce::ParameterID wear         { "wear",         1 };
     }
 
     /** The performance gestures, in MIDI note order (Throw, Freeze, Tapestop, Runaway, Reverse). */
