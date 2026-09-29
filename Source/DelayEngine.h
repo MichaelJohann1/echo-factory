@@ -32,6 +32,13 @@
     Runaway raises feedback above 100% and pushes the saturator fully in. The
     saturator's ceiling keeps the loop bounded, and a DC blocker stops any
     offset from building up.
+
+    Tapestop moves a separate output read head, so the feedback loop (and a
+    frozen loop) is never touched: only what you hear slows to a stop, fading
+    out as it goes, then spins back up in half the stop time. Once fully
+    stopped and silent, the head jumps to where the spin-up will land exactly
+    on the live loop; if released early, a short splice brings it back. The
+    output has its own copy of the filters, fed the same signal when idle.
 */
 class DelayEngine
 {
@@ -65,10 +72,20 @@ public:
     void setRunaway (bool shouldRunAway)   { runawayAmount.setTargetValue (shouldRunAway ? 1.0f : 0.0f); }
     void setRunawayDrive (float amount01)  { runawayDrive.setTargetValue (juce::jlimit (0.0f, 1.0f, amount01)); }
 
+    void setTapestop (bool shouldStop)     { tapestopHeld = shouldStop; }
+    void setTapestopTimeMs (float ms);
+
     void process (juce::AudioBuffer<float>& buffer);
 
 private:
     float filter (int channel, float sample);
+    float outputFilter (int channel, float sample);
+
+    /** Advances the tapestop transport by one sample. */
+    void advanceTapestop (float delay);
+
+    /** What the output read head hears. Call before the loop's popSample for this sample. */
+    float readHeard (int channel, float delay);
 
     /** DC blocking, saturation and darkening, each scaled so 0 leaves the sample untouched. */
     float tape (int channel, float sample, float amount, float ceiling, float darken);
@@ -76,6 +93,7 @@ private:
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> delayLine;
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> widthDelayLine;
     juce::dsp::StateVariableTPTFilter<float> lowCutFilter, highCutFilter;
+    juce::dsp::StateVariableTPTFilter<float> lowCutOutFilter, highCutOutFilter;
     juce::SmoothedValue<float> delaySamples, feedback, mix, freezeAmount, pingPongAmount, widthSamples, inputSend;
     juce::SmoothedValue<float> wear, runawayAmount, runawayDrive;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> lowCutHz { 20.0f }, highCutHz { 20000.0f };
@@ -91,4 +109,10 @@ private:
     float drift = 0.0f, driftTarget = 0.0f, driftCoef = 0.0f;
     int driftCountdown = 0;
     juce::Random random;
+
+    // Tapestop state: speed 1 is normal, offset is how far the output head trails the loop.
+    bool tapestopHeld = false, tapestopWasHeld = false;
+    float tapeSpeed = 1.0f, tapeOffset = 0.0f, stopStep = 0.0f, startStep = 0.0f;
+    float spliceAmount = 0.0f, spliceOffset = 0.0f, spliceStep = 0.0f;
+    float maxReadSamples = 1.0f;
 };

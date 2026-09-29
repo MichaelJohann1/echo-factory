@@ -16,7 +16,7 @@ and the fixed MIDI map. Change it here first, then in code.
 |-----------|----------|---------|
 | Throw     | Sends the input into the delay at Throw Level. With **Input: Throw Only**, nothing else reaches the delay. | Throw Level |
 | Freeze    | Stops taking in new audio and loops the buffer forever. | Freeze Fade |
-| Tapestop  | Slows the delay to a stop; spins back up on release. Works while frozen. | Tapestop Time |
+| Tapestop  | The echoes slow to a stop and fade out; on release they spin back up in half the time and land exactly back on the loop. Works while frozen; the frozen loop is untouched. | Tapestop Time (100 ms–2 s) |
 | Runaway   | Feedback above 100% into the Wear saturator. | Runaway Drive |
 | Reverse   | Echoes play backwards, one delay time per segment. | — |
 
@@ -54,7 +54,7 @@ Ctrl-Option (VoiceOver modifier), number keys (often taken by Live).
 
 Any channel. The VST3 and Standalone receive MIDI. The AU stays type `aufx` so
 saved sessions keep loading, which means most AU hosts (Logic) won't send it MIDI.
-In Ableton, use the VST3 for MIDI. CC 24 and 31 arrive with their stages. Note numbers are MIDI numbers; Live names 36 "C1", some hosts "C2".
+In Ableton, use the VST3 for MIDI. CC 24 arrives with Diffusion. Note numbers are MIDI numbers; Live names 36 "C1", some hosts "C2".
 Laid out for 4×4 pad controllers starting at 36.
 
 | Notes | Action |

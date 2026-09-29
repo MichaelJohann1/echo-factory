@@ -29,6 +29,7 @@ namespace Params
         inline const juce::ParameterID throwLevelDb { "throwLevelDb", 1 };
         inline const juce::ParameterID freezeFadeMs { "freezeFadeMs", 1 };
         inline const juce::ParameterID runawayDrive { "runawayDrive", 1 };
+        inline const juce::ParameterID tapestopTimeMs { "tapestopTimeMs", 1 };
 
         // Character
         inline const juce::ParameterID wear         { "wear",         1 };
@@ -56,6 +57,11 @@ namespace Params
     constexpr float minFreezeFadeMs     = 10.0f;
     constexpr float maxFreezeFadeMs     = 2000.0f;
     constexpr float defaultFreezeFadeMs = 20.0f;
+
+    // How long Tapestop takes to stop; spin-up takes half as long.
+    constexpr float minTapestopMs     = 100.0f;
+    constexpr float maxTapestopMs     = 2000.0f;
+    constexpr float defaultTapestopMs = 500.0f;
 
     // At these extremes the filter is bypassed and reads as "Off".
     constexpr float lowCutMinHz  = 20.0f;

@@ -171,17 +171,24 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     freezeFadeSlider.setExplicitFocusOrder (17);
     freezeFadeAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::freezeFadeMs.getParamID(), freezeFadeSlider);
 
+    setupSlider (tapestopTimeSlider, tapestopTimeLabel, "Tapestop Time",
+                 "How long Tapestop takes to slow the echoes to a stop, from 100 milliseconds to 2 seconds. "
+                 "Spinning back up takes half as long.");
+    tapestopTimeSlider.spokenTextFromValue = [] (double v) { return Params::formatMilliseconds ((float) v, true); };
+    tapestopTimeSlider.setExplicitFocusOrder (18);
+    tapestopTimeAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::tapestopTimeMs.getParamID(), tapestopTimeSlider);
+
     setupPercentSlider (runawayDriveSlider, runawayDriveLabel, "Runaway Drive",
                         "How hard Runaway pushes, 0 to 100 percent: feedback from 110 to 160 percent into the saturator. "
                         "Higher builds faster and distorts harder.");
-    runawayDriveSlider.setExplicitFocusOrder (18);
+    runawayDriveSlider.setExplicitFocusOrder (19);
     runawayDriveAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::runawayDrive.getParamID(), runawayDriveSlider);
 
     resetButton.setTitle ("Reset");
     resetButton.setDescription ("Releases every gesture and latch, including Freeze, and undoes "
                                 "feedback and delay time changes made with the arrow keys in Perform mode.");
     resetButton.setWantsKeyboardFocus (true);
-    resetButton.setExplicitFocusOrder (19);
+    resetButton.setExplicitFocusOrder (20);
     resetButton.onClick = [this] { processorRef.resetPerformance(); };
     addAndMakeVisible (resetButton);
 
@@ -202,7 +209,7 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
 
     setWantsKeyboardFocus (false);
     setResizable (false, false);
-    setSize (760, 710);
+    setSize (860, 710);
 }
 
 EchoFactoryEditor::~EchoFactoryEditor()
@@ -321,7 +328,8 @@ void EchoFactoryEditor::setMainControlsVisible (bool shouldBeVisible)
                                                             &widthLabel, &lowCutLabel, &highCutLabel, &filterPosLabel,
                                                             &performPad, &throwLevelSlider, &freezeFadeSlider, &inputModeBox, &resetButton,
                                                             &throwLevelLabel, &freezeFadeLabel, &inputModeLabel,
-                                                            &wearSlider, &wearLabel, &runawayDriveSlider, &runawayDriveLabel })
+                                                            &wearSlider, &wearLabel, &runawayDriveSlider, &runawayDriveLabel,
+                                                            &tapestopTimeSlider, &tapestopTimeLabel })
         c->setVisible (shouldBeVisible);
 }
 
@@ -414,14 +422,15 @@ void EchoFactoryEditor::resized()
     highCutSlider.setBounds (row2.removeFromLeft (columnWidth).reduced (6, 0));
     filterPosBox.setBounds (row2.withSizeKeepingCentre (juce::jmin (row2.getWidth() - 12, 200), 30));
 
-    // Row 3: perform pad and its settings, in six columns
+    // Row 3: perform pad and its settings, in seven columns
     auto row3 = area.withTrimmedTop (12).withTrimmedBottom (8);
-    const auto performColumn = row3.getWidth() / 6;
+    const auto performColumn = row3.getWidth() / 7;
 
     performPad.setBounds (row3.removeFromLeft (performColumn * 2).reduced (6, 0));
     row3.removeFromTop (20); // labels
     throwLevelSlider.setBounds (row3.removeFromLeft (performColumn).reduced (6, 0));
     freezeFadeSlider.setBounds (row3.removeFromLeft (performColumn).reduced (6, 0));
+    tapestopTimeSlider.setBounds (row3.removeFromLeft (performColumn).reduced (6, 0));
     runawayDriveSlider.setBounds (row3.removeFromLeft (performColumn).reduced (6, 0));
     auto lastColumn = row3.reduced (6, 0);
     inputModeBox.setBounds (lastColumn.removeFromTop (lastColumn.getHeight() / 2).withSizeKeepingCentre (lastColumn.getWidth(), 30));

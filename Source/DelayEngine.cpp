@@ -18,6 +18,12 @@ namespace
 
     constexpr float dcBlockHz = 5.0f;
 
+    // Tapestop
+    constexpr float minTapestopMs = 50.0f, maxTapestopMs = 2000.0f;
+    constexpr float spinUpRatio   = 0.5f;  // spin-up takes half the stop time
+    constexpr float silentBelow   = 0.3f;  // speed under which the output fades out
+    constexpr float spliceMs      = 50.0f;
+
     float onePoleCoef (float hz, double sampleRate)
     {
         return 1.0f - std::exp (-juce::MathConstants<float>::twoPi * hz / (float) sampleRate);
@@ -29,7 +35,9 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     sampleRate = newSampleRate;
     maxDelaySamples = (float) (maxDelayMs * 0.001 * sampleRate);
 
-    delayLine.setMaximumDelayInSamples ((int) std::ceil (maxDelaySamples) + 2);
+    // Headroom for the tapestop head, which trails by up to the stop plus spin-up growth.
+    maxReadSamples = maxDelaySamples + (float) ((maxTapestopMs * (1.0f + spinUpRatio) * 0.5f + 10.0f) * 0.001 * sampleRate);
+    delayLine.setMaximumDelayInSamples ((int) std::ceil (maxReadSamples) + 2);
     const juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) maxBlockSize, (juce::uint32) juce::jmax (1, numChannels) };
     delayLine.prepare (spec);
 
@@ -41,6 +49,13 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     highCutFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
     lowCutFilter.prepare (spec);
     highCutFilter.prepare (spec);
+    lowCutOutFilter.setType (juce::dsp::StateVariableTPTFilterType::highpass);
+    highCutOutFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
+    lowCutOutFilter.prepare (spec);
+    highCutOutFilter.prepare (spec);
+
+    spliceStep = 1.0f / (spliceMs * 0.001f * (float) sampleRate);
+    setTapestopTimeMs (500.0f);
 
     delaySmoothingSamples = -1; // forces the ramp length to be recalculated for this sample rate
     setDelaySmoothingMs (50.0f);
@@ -72,10 +87,14 @@ void DelayEngine::reset()
     widthDelayLine.reset();
     lowCutFilter.reset();
     highCutFilter.reset();
+    lowCutOutFilter.reset();
+    highCutOutFilter.reset();
     lowCutHz.setCurrentAndTargetValue (lowCutHz.getTargetValue());
     highCutHz.setCurrentAndTargetValue (highCutHz.getTargetValue());
     lowCutFilter.setCutoffFrequency (lowCutHz.getCurrentValue());
     highCutFilter.setCutoffFrequency (highCutHz.getCurrentValue());
+    lowCutOutFilter.setCutoffFrequency (lowCutHz.getCurrentValue());
+    highCutOutFilter.setCutoffFrequency (highCutHz.getCurrentValue());
     delaySamples.setCurrentAndTargetValue (delaySamples.getTargetValue());
     feedback.setCurrentAndTargetValue (feedback.getTargetValue());
     mix.setCurrentAndTargetValue (mix.getTargetValue());
@@ -91,6 +110,10 @@ void DelayEngine::reset()
 
     wowPhase = flutterPhase = drift = driftTarget = 0.0f;
     driftCountdown = 0;
+
+    tapeSpeed = tapestopHeld ? 0.0f : 1.0f;
+    tapeOffset = spliceAmount = spliceOffset = 0.0f;
+    tapestopWasHeld = tapestopHeld;
     widthSamples.setCurrentAndTargetValue (widthSamples.getTargetValue());
 }
 
@@ -168,6 +191,70 @@ float DelayEngine::filter (int channel, float sample)
     return highCutOn ? high : afterLow;
 }
 
+float DelayEngine::outputFilter (int channel, float sample)
+{
+    // Same chain as filter(), for the output head. While tapestop is idle it
+    // sees exactly the same samples, so it produces exactly the same output.
+    const auto low  = lowCutOutFilter.processSample (channel, sample);
+    const auto afterLow = lowCutOn ? low : sample;
+    const auto high = highCutOutFilter.processSample (channel, afterLow);
+    return highCutOn ? high : afterLow;
+}
+
+void DelayEngine::setTapestopTimeMs (float ms)
+{
+    const auto stopSamples = juce::jlimit (minTapestopMs, maxTapestopMs, ms) * 0.001f * (float) sampleRate;
+    stopStep  = 1.0f / stopSamples;
+    startStep = 1.0f / (stopSamples * spinUpRatio);
+}
+
+void DelayEngine::advanceTapestop (float delay)
+{
+    if (tapestopWasHeld && ! tapestopHeld && tapeSpeed <= 0.0f)
+    {
+        // Released while stopped (and silent): jump the head ahead by exactly
+        // what the spin-up will lose, so it lands back on the loop.
+        const auto spinUpSamples = 1.0f / startStep;
+        tapeOffset = juce::jmax ((spinUpSamples - 1.0f) * -0.5f, 1.0f - delay);
+    }
+
+    tapestopWasHeld = tapestopHeld;
+
+    if (tapestopHeld)
+        tapeSpeed = juce::jmax (0.0f, tapeSpeed - stopStep);
+    else if (tapeSpeed < 1.0f)
+        tapeSpeed = juce::jmin (1.0f, tapeSpeed + startStep);
+
+    // The head trails further while it's slower than the tape; once stopped
+    // and silent there's nothing to track.
+    if (tapeSpeed > 0.0f)
+        tapeOffset += 1.0f - tapeSpeed;
+
+    // Back at speed but not quite on the loop (released early, or clamped):
+    // splice back to it.
+    if (tapeSpeed >= 1.0f && ! juce::approximatelyEqual (tapeOffset, 0.0f))
+    {
+        spliceOffset = tapeOffset;
+        spliceAmount = 1.0f;
+        tapeOffset = 0.0f;
+    }
+
+    spliceAmount = juce::jmax (0.0f, spliceAmount - spliceStep);
+}
+
+float DelayEngine::readHeard (int channel, float delay)
+{
+    auto heard = delayLine.popSample (channel, juce::jlimit (1.0f, maxReadSamples, delay + tapeOffset), false);
+
+    if (spliceAmount > 0.0f)
+    {
+        const auto old = delayLine.popSample (channel, juce::jlimit (1.0f, maxReadSamples, delay + spliceOffset), false);
+        heard += spliceAmount * (old - heard);
+    }
+
+    return heard;
+}
+
 float DelayEngine::tape (int channel, float sample, float amount, float ceiling, float darken)
 {
     dcState[channel] += dcCoef * (sample - dcState[channel]);
@@ -234,8 +321,23 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
         if (frozen > 0.0f)
             d = std::round (d);
 
-        if (lowCutHz.isSmoothing())  lowCutFilter.setCutoffFrequency (lowCutHz.getNextValue());
-        if (highCutHz.isSmoothing()) highCutFilter.setCutoffFrequency (highCutHz.getNextValue());
+        if (lowCutHz.isSmoothing())
+        {
+            const auto hz = lowCutHz.getNextValue();
+            lowCutFilter.setCutoffFrequency (hz);
+            lowCutOutFilter.setCutoffFrequency (hz);
+        }
+
+        if (highCutHz.isSmoothing())
+        {
+            const auto hz = highCutHz.getNextValue();
+            highCutFilter.setCutoffFrequency (hz);
+            highCutOutFilter.setCutoffFrequency (hz);
+        }
+
+        advanceTapestop (d);
+        const auto tapeGain = tapeSpeed >= silentBelow ? 1.0f
+                            : [] (float x) { return x * x * (3.0f - 2.0f * x); } (tapeSpeed / silentBelow);
 
         if (! isStereo)
         {
@@ -243,6 +345,7 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
             {
                 auto* data = buffer.getWritePointer (ch);
                 const auto dry = data[i];
+                const auto heard = readHeard (ch, d);
                 const auto delayed = delayLine.popSample (ch, d);
 
                 const auto echo = filter (ch, delayed);
@@ -250,7 +353,7 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
 
                 delayLine.pushSample (ch, normalWrite + frozen * (delayed - normalWrite));
 
-                data[i] = dry * (1.0f - wet) + echo * wet;
+                data[i] = dry * (1.0f - wet) + tapeGain * outputFilter (ch, heard) * wet;
             }
 
             continue;
@@ -259,6 +362,7 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
         auto* left  = buffer.getWritePointer (0);
         auto* right = buffer.getWritePointer (1);
         const float dry[2] { left[i], right[i] };
+        const float heard[2] { readHeard (0, d), readHeard (1, d) };
         const float delayed[2] { delayLine.popSample (0, d), delayLine.popSample (1, d) };
         const float echo[2] { filter (0, delayed[0]), filter (1, delayed[1]) };
         const float looped[2] { filtersInLoop ? echo[0] : delayed[0], filtersInLoop ? echo[1] : delayed[1] };
@@ -279,10 +383,12 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
             delayLine.pushSample (ch, write + frozen * (frozenWrite[ch] - write));
         }
 
-        widthDelayLine.pushSample (0, echo[1]);
+        const float heardEcho[2] { tapeGain * outputFilter (0, heard[0]), tapeGain * outputFilter (1, heard[1]) };
+
+        widthDelayLine.pushSample (0, heardEcho[1]);
         const auto rightEcho = widthDelayLine.popSample (0, width);
 
-        left[i]  = dry[0] * (1.0f - wet) + echo[0] * wet;
+        left[i]  = dry[0] * (1.0f - wet) + heardEcho[0] * wet;
         right[i] = dry[1] * (1.0f - wet) + rightEcho * wet;
     }
 }

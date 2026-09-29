@@ -20,6 +20,7 @@ namespace
         static const std::vector<CCMapping> map {
             { 21, &Params::ID::feedback },     { 22, &Params::ID::mix },
             { 23, &Params::ID::wear },         { 85, &Params::ID::runawayDrive },
+            { 31, &Params::ID::tapestopTimeMs },
             { 25, &Params::ID::lowCut },       { 26, &Params::ID::highCut },
             { 27, &Params::ID::stereoWidthMs }, { 28, &Params::ID::timeSmoothingMs },
             { 29, &Params::ID::throwLevelDb }, { 30, &Params::ID::freezeFadeMs },
@@ -58,6 +59,7 @@ EchoFactoryProcessor::EchoFactoryProcessor()
     throwLevelParam   = apvts.getRawParameterValue (Params::ID::throwLevelDb.getParamID());
     freezeFadeParam   = apvts.getRawParameterValue (Params::ID::freezeFadeMs.getParamID());
     runawayDriveParam = apvts.getRawParameterValue (Params::ID::runawayDrive.getParamID());
+    tapestopTimeParam = apvts.getRawParameterValue (Params::ID::tapestopTimeMs.getParamID());
     wearParam         = apvts.getRawParameterValue (Params::ID::wear.getParamID());
 
     for (size_t i = 0; i < gestureParams.size(); ++i)
@@ -311,6 +313,8 @@ void EchoFactoryProcessor::updateEngineParameters()
     engine.setWear (wearParam->load() * 0.01f);
     engine.setRunaway (isGestureOn (3));
     engine.setRunawayDrive (runawayDriveParam->load() * 0.01f);
+    engine.setTapestopTimeMs (tapestopTimeParam->load());
+    engine.setTapestop (isGestureOn (2));
 }
 
 void EchoFactoryProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)

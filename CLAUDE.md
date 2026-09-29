@@ -46,6 +46,9 @@ cmake --build build -j 10
   - Freeze crossfades the write path to the buffer's own unfiltered output, and rounds the delay to whole samples while frozen.
   - Filters always run, even when bypassed, so switching them on doesn't click.
   - Wear and Runaway both go through `DelayEngine::tape()` on the write path (the frozen path skips it). `tape()` applies a DC blocker, a `tanh` saturator with a ceiling, and one-pole darkening. Each is crossfaded by an amount, so Wear 0 is bit-exact clean. Wear also adds wow, flutter and random drift to the delay time, which fade out while frozen.
+  - Tapestop runs on a second, non-advancing read head: `readHeard`, which is called before the loop's `popSample`. It feeds the output only, through a separate copy of the filters (`outputFilter`). So the feedback loop and a frozen loop are never slowed.
+    - When the stop completes, the output is silent. The head then jumps ahead by exactly what the spin-up will add, so it lands back on the loop. If you release early, a 50 ms splice brings it back instead.
+    - When idle, the output head reads the same samples as the loop, so the output is unchanged.
   - Runaway ramps feedback to 110–160% while pushing the saturator fully in. The loop stays bounded because the linear part of the loop gain stays below 1 throughout the ramp. Check any change here with an offline test before trusting it by ear.
 - **Performance** (`docs/perform-map.md` is the spec for keys and MIDI):
   - Each gesture (Throw, Freeze, Tapestop, Runaway, Reverse) is a bool parameter. Held versus latched only exists in the UI and MIDI layers.

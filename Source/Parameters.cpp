@@ -227,6 +227,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (std::make_unique<AudioParameterFloat> (
         ID::freezeFadeMs, "Freeze Fade", freezeFadeRange, defaultFreezeFadeMs, millisecondAttributes()));
 
+    NormalisableRange<float> tapestopRange { minTapestopMs, maxTapestopMs, 1.0f };
+    tapestopRange.setSkewForCentre (500.0f);
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::tapestopTimeMs, "Tapestop Time", tapestopRange, defaultTapestopMs, millisecondAttributes()));
+
     layout.add (std::make_unique<AudioParameterFloat> (
         ID::runawayDrive, "Runaway Drive", NormalisableRange<float> { 0.0f, 100.0f, 0.1f }, 50.0f, percentAttributes()));
 
