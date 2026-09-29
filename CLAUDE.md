@@ -27,7 +27,8 @@ cmake --build build -j 10
 - The Standalone app is at `build/EchoFactory_artefacts/Debug/Standalone/Echo Factory.app`.
 - The Standalone app has no host tempo, so tempo sync falls back to 120 BPM there.
 - The Standalone app needs `MICROPHONE_PERMISSION_ENABLED`, because otherwise macOS silently gives it zero input. It's ad-hoc signed, so macOS may ask for mic access again after a rebuild.
-- There are no unit tests. Validation is:
+- Validation is:
+  - **Engine tests:** run `cmake --build build --target EngineTests && ./build/EngineTests_artefacts/Debug/EngineTests`. They're offline checks of `DelayEngine`, not part of the default build: clean-path exactness, Runaway staying bounded, Wear decaying, and Tapestop returning exactly with no clicks. Run them after any DSP change.
   - **Warnings:** the build should produce none from `Source/`. JUCE's recommended warning flags are on.
   - **AU:** run `killall -9 AudioComponentRegistrar; auval -v aufx Ecfy Zbau`.
   - **Accessibility:** a manual VoiceOver pass in the Standalone app. osascript has no assistive access here, so the accessibility tree can't be inspected automatically.
@@ -49,7 +50,7 @@ cmake --build build -j 10
   - Tapestop runs on a second, non-advancing read head: `readHeard`, which is called before the loop's `popSample`. It feeds the output only, through a separate copy of the filters (`outputFilter`). So the feedback loop and a frozen loop are never slowed.
     - When the stop completes, the output is silent. The head then jumps ahead by exactly what the spin-up will add, so it lands back on the loop. If you release early, a 50 ms splice brings it back instead.
     - When idle, the output head reads the same samples as the loop, so the output is unchanged.
-  - Runaway ramps feedback to 110–160% while pushing the saturator fully in. The loop stays bounded because the linear part of the loop gain stays below 1 throughout the ramp. Check any change here with an offline test before trusting it by ear.
+  - Runaway ramps feedback to 110–160% while pushing the saturator fully in. The loop stays bounded because the linear part of the loop gain stays below 1 throughout the ramp. The saturator comes in twice as fast as the feedback, so pressing Runaway can't overshoot. `tests/EngineTests.cpp` checks this.
 - **Performance** (`docs/perform-map.md` is the spec for keys and MIDI):
   - Each gesture (Throw, Freeze, Tapestop, Runaway, Reverse) is a bool parameter. Held versus latched only exists in the UI and MIDI layers.
   - Throw is applied through `DelayEngine::setInputSend`. The processor sends Throw Level while throwing, and otherwise unity, or 0 in Throw Only mode.

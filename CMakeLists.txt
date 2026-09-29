@@ -63,3 +63,17 @@ target_link_libraries(EchoFactory
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# ---- Offline engine tests (not part of the default build) ------------------
+#   cmake --build build --target EngineTests && ./build/EngineTests_artefacts/Debug/EngineTests
+juce_add_console_app(EngineTests PRODUCT_NAME "EngineTests")
+set_target_properties(EngineTests PROPERTIES EXCLUDE_FROM_ALL TRUE)
+target_sources(EngineTests PRIVATE tests/EngineTests.cpp Source/DelayEngine.cpp)
+target_include_directories(EngineTests PRIVATE Source)
+target_compile_definitions(EngineTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(EngineTests
+    PRIVATE
+        juce::juce_audio_basics
+        juce::juce_dsp
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
