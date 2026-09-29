@@ -240,6 +240,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (std::make_unique<AudioParameterFloat> (
         ID::wear, "Wear", NormalisableRange<float> { 0.0f, 100.0f, 0.1f }, 0.0f, percentAttributes()));
 
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ID::diffusion, "Diffusion", NormalisableRange<float> { 0.0f, 100.0f, 0.1f }, 0.0f, percentAttributes()));
+
     return layout;
 }
 }

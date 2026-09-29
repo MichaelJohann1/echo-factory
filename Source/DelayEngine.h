@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_dsp/juce_dsp.h>
+#include "DiffusionNetwork.h"
 
 /**
     Stereo feedback delay with smoothed time, feedback and mix, plus 12 dB/oct
@@ -39,6 +40,18 @@
     stopped and silent, the head jumps to where the spin-up will land exactly
     on the live loop; if released early, a short splice brings it back. The
     output has its own copy of the filters, fed the same signal when idle.
+
+    Diffusion turns the delay into a reverb. The heard echoes are blended
+    (equal power) into a DiffusionNetwork reverb per channel, after the loop.
+    As it goes up, the delay's own feedback is handed over to the reverb's
+    tail, whose length is set from what the feedback would have given; at
+    full, the delay feeds the reverb once, so no separate repeats are left.
+    The reverb is never inside the loop, so the loop can't run away.
+
+    Reverse also lives on the output head: two heads read backwards over
+    segments one delay time long, half a segment apart, with sin² windows that
+    always sum to 1. The loop is untouched, so a frozen loop plays backwards and
+    comes back as it was. The heads slow with Tapestop.
 */
 class DelayEngine
 {
@@ -73,6 +86,8 @@ public:
     void setRunawayDrive (float amount01)  { runawayDrive.setTargetValue (juce::jlimit (0.0f, 1.0f, amount01)); }
 
     void setTapestop (bool shouldStop)     { tapestopHeld = shouldStop; }
+    void setReverse (bool shouldReverse)   { reverseHeld = shouldReverse; }
+    void setDiffusion (float amount01)     { diffusion.setTargetValue (juce::jlimit (0.0f, 1.0f, amount01)); }
     void setTapestopTimeMs (float ms);
 
     void process (juce::AudioBuffer<float>& buffer);
@@ -81,8 +96,13 @@ private:
     float filter (int channel, float sample);
     float outputFilter (int channel, float sample);
 
-    /** Advances the tapestop transport by one sample. */
+    /** Advances the tapestop transport and the reverse heads by one sample. */
     void advanceTapestop (float delay);
+    void advanceReverse (float delay);
+
+    /** Blends the heard echo into the reverb; untouched while Diffusion is 0. */
+    float reverberate (int channel, float echo);
+
 
     /** What the output read head hears. Call before the loop's popSample for this sample. */
     float readHeard (int channel, float delay);
@@ -95,7 +115,7 @@ private:
     juce::dsp::StateVariableTPTFilter<float> lowCutFilter, highCutFilter;
     juce::dsp::StateVariableTPTFilter<float> lowCutOutFilter, highCutOutFilter;
     juce::SmoothedValue<float> delaySamples, feedback, mix, freezeAmount, pingPongAmount, widthSamples, inputSend;
-    juce::SmoothedValue<float> wear, runawayAmount, runawayDrive;
+    juce::SmoothedValue<float> wear, runawayAmount, runawayDrive, diffusion, reverseAmount;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> lowCutHz { 20.0f }, highCutHz { 20000.0f };
     bool lowCutOn = false, highCutOn = false, filtersInLoop = true;
     int delaySmoothingSamples = -1, freezeFadeSamples = -1;
@@ -115,4 +135,12 @@ private:
     float tapeSpeed = 1.0f, tapeOffset = 0.0f, stopStep = 0.0f, startStep = 0.0f;
     float spliceAmount = 0.0f, spliceOffset = 0.0f, spliceStep = 0.0f;
     float maxReadSamples = 1.0f;
+
+    // Reverse: phase through the current segment, and how far in reverse is (0..1).
+    bool reverseHeld = false;
+    float reversePhase = 0.0f, reverseMix = 0.0f;
+
+    std::array<DiffusionNetwork, 2> diffusers;
+    float diffusionCos = 1.0f, diffusionSin = 0.0f, diffusionSetting = 0.0f, diffusionRt60 = 0.0f, diffusionMakeup = 1.0f;
+    bool diffusionActive = false;
 };

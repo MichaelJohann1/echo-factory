@@ -18,7 +18,7 @@ and the fixed MIDI map. Change it here first, then in code.
 | Freeze    | Stops taking in new audio and loops the buffer forever. | Freeze Fade |
 | Tapestop  | The echoes slow to a stop and fade out; on release they spin back up in half the time and land exactly back on the loop. Works while frozen; the frozen loop is untouched. | Tapestop Time (100 ms–2 s) |
 | Runaway   | Feedback above 100% into the Wear saturator. | Runaway Drive |
-| Reverse   | Echoes play backwards, one delay time per segment. | — |
+| Reverse   | Echoes play backwards in overlapping segments one delay time long; release and they're back exactly where they were. Works while frozen. | — |
 
 Reset releases every gesture and latch, including Freeze and MIDI-held notes,
 and undoes feedback and delay time changes made with the Perform-mode arrow keys.
@@ -54,7 +54,7 @@ Ctrl-Option (VoiceOver modifier), number keys (often taken by Live).
 
 Any channel. The VST3 and Standalone receive MIDI. The AU stays type `aufx` so
 saved sessions keep loading, which means most AU hosts (Logic) won't send it MIDI.
-In Ableton, use the VST3 for MIDI. CC 24 arrives with Diffusion. Note numbers are MIDI numbers; Live names 36 "C1", some hosts "C2".
+In Ableton, use the VST3 for MIDI. Note numbers are MIDI numbers; Live names 36 "C1", some hosts "C2".
 Laid out for 4×4 pad controllers starting at 36.
 
 | Notes | Action |

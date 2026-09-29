@@ -111,25 +111,32 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     wearSlider.setExplicitFocusOrder (10);
     wearAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::wear.getParamID(), wearSlider);
 
+    // ---- Diffusion -------------------------------------------------------
+    setupPercentSlider (diffusionSlider, diffusionLabel, "Diffusion",
+                        "Turns the echoes into a reverb, 0 to 100 percent. At full there are no separate repeats, "
+                        "and Feedback sets how long the reverb lasts. Combine with Freeze for pads. At 0 the echoes are clean.");
+    diffusionSlider.setExplicitFocusOrder (11);
+    diffusionAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::diffusion.getParamID(), diffusionSlider);
+
     // ---- Stereo width ----------------------------------------------------
     setupSlider (widthSlider, widthLabel, "Stereo Width",
                  "Delays the right channel of the echoes by 0 to 100 milliseconds to widen them. "
                  "Does not affect the dry signal. Stereo only.");
     widthSlider.spokenTextFromValue = [] (double v) { return Params::formatMilliseconds ((float) v, true); };
-    widthSlider.setExplicitFocusOrder (11);
+    widthSlider.setExplicitFocusOrder (12);
     widthAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::stereoWidthMs.getParamID(), widthSlider);
 
     // ---- Filters ---------------------------------------------------------
     setupFrequencySlider (lowCutSlider, lowCutLabel, "Low Cut",
                           "High-pass filter on the echoes, off or 21 hertz to 2 kilohertz. Turn fully down for off.",
                           Params::lowCutMinHz);
-    lowCutSlider.setExplicitFocusOrder (12);
+    lowCutSlider.setExplicitFocusOrder (13);
     lowCutAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::lowCut.getParamID(), lowCutSlider);
 
     setupFrequencySlider (highCutSlider, highCutLabel, "High Cut",
                           "Low-pass filter on the echoes, 500 hertz to 20 kilohertz or off. Turn fully up for off.",
                           Params::highCutMaxHz);
-    highCutSlider.setExplicitFocusOrder (13);
+    highCutSlider.setExplicitFocusOrder (14);
     highCutAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::highCut.getParamID(), highCutSlider);
 
     filterPosLabel.setText ("Filter Position", juce::dontSendNotification);
@@ -140,7 +147,7 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     filterPosBox.setDescription ("In Feedback Loop filters every repeat, so echoes get progressively darker or thinner. "
                                  "Output Only filters the echoes once, without changing the feedback.");
     filterPosBox.setWantsKeyboardFocus (true);
-    filterPosBox.setExplicitFocusOrder (14);
+    filterPosBox.setExplicitFocusOrder (15);
     addAndMakeVisible (filterPosBox);
     filterPosAttachment = std::make_unique<ComboBoxAttachment> (p.apvts, Params::ID::filterPos.getParamID(), filterPosBox);
 
@@ -153,7 +160,7 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     inputModeBox.setDescription ("Always sends the input into the delay. "
                                  "Throw Only sends it in only while Throw is held or latched.");
     inputModeBox.setWantsKeyboardFocus (true);
-    inputModeBox.setExplicitFocusOrder (15);
+    inputModeBox.setExplicitFocusOrder (16);
     addAndMakeVisible (inputModeBox);
     inputModeAttachment = std::make_unique<ComboBoxAttachment> (p.apvts, Params::ID::inputMode.getParamID(), inputModeBox);
 
@@ -161,34 +168,34 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
                  "Level of the input sent into the delay while Throw is on, minus 12 to plus 12 decibels.");
     throwLevelSlider.spokenTextFromValue = [] (double v) { return Params::formatDecibels ((float) v, true); };
     throwLevelSlider.setNumKeyboardSteps (24);
-    throwLevelSlider.setExplicitFocusOrder (16);
+    throwLevelSlider.setExplicitFocusOrder (17);
     throwLevelAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::throwLevelDb.getParamID(), throwLevelSlider);
 
     setupSlider (freezeFadeSlider, freezeFadeLabel, "Freeze Fade",
                  "How long Freeze takes to fade in and out, from 10 milliseconds to 2 seconds. "
                  "Long fades swell into the frozen sound.");
     freezeFadeSlider.spokenTextFromValue = [] (double v) { return Params::formatMilliseconds ((float) v, true); };
-    freezeFadeSlider.setExplicitFocusOrder (17);
+    freezeFadeSlider.setExplicitFocusOrder (18);
     freezeFadeAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::freezeFadeMs.getParamID(), freezeFadeSlider);
 
     setupSlider (tapestopTimeSlider, tapestopTimeLabel, "Tapestop Time",
                  "How long Tapestop takes to slow the echoes to a stop, from 100 milliseconds to 2 seconds. "
                  "Spinning back up takes half as long.");
     tapestopTimeSlider.spokenTextFromValue = [] (double v) { return Params::formatMilliseconds ((float) v, true); };
-    tapestopTimeSlider.setExplicitFocusOrder (18);
+    tapestopTimeSlider.setExplicitFocusOrder (19);
     tapestopTimeAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::tapestopTimeMs.getParamID(), tapestopTimeSlider);
 
     setupPercentSlider (runawayDriveSlider, runawayDriveLabel, "Runaway Drive",
                         "How hard Runaway pushes, 0 to 100 percent: feedback from 110 to 160 percent into the saturator. "
                         "Higher builds faster and distorts harder.");
-    runawayDriveSlider.setExplicitFocusOrder (19);
+    runawayDriveSlider.setExplicitFocusOrder (20);
     runawayDriveAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::runawayDrive.getParamID(), runawayDriveSlider);
 
     resetButton.setTitle ("Reset");
     resetButton.setDescription ("Releases every gesture and latch, including Freeze, and undoes "
                                 "feedback and delay time changes made with the arrow keys in Perform mode.");
     resetButton.setWantsKeyboardFocus (true);
-    resetButton.setExplicitFocusOrder (20);
+    resetButton.setExplicitFocusOrder (21);
     resetButton.onClick = [this] { processorRef.resetPerformance(); };
     addAndMakeVisible (resetButton);
 
@@ -329,7 +336,7 @@ void EchoFactoryEditor::setMainControlsVisible (bool shouldBeVisible)
                                                             &performPad, &throwLevelSlider, &freezeFadeSlider, &inputModeBox, &resetButton,
                                                             &throwLevelLabel, &freezeFadeLabel, &inputModeLabel,
                                                             &wearSlider, &wearLabel, &runawayDriveSlider, &runawayDriveLabel,
-                                                            &tapestopTimeSlider, &tapestopTimeLabel })
+                                                            &tapestopTimeSlider, &tapestopTimeLabel, &diffusionSlider, &diffusionLabel })
         c->setVisible (shouldBeVisible);
 }
 
@@ -413,13 +420,15 @@ void EchoFactoryEditor::resized()
     feedbackSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
     mixSlider.setBounds (row1.reduced (6, 0));
 
-    // Row 2: wear, stereo width and filters
+    // Row 2: character, stereo width and filters, in six columns
     auto row2 = area.removeFromTop (area.getHeight() / 2).withTrimmedTop (32).withTrimmedBottom (8); // separator line + labels
+    const auto row2Column = row2.getWidth() / 6;
 
-    wearSlider.setBounds (row2.removeFromLeft (columnWidth).reduced (6, 0));
-    widthSlider.setBounds (row2.removeFromLeft (columnWidth).reduced (6, 0));
-    lowCutSlider.setBounds (row2.removeFromLeft (columnWidth).reduced (6, 0));
-    highCutSlider.setBounds (row2.removeFromLeft (columnWidth).reduced (6, 0));
+    wearSlider.setBounds (row2.removeFromLeft (row2Column).reduced (6, 0));
+    diffusionSlider.setBounds (row2.removeFromLeft (row2Column).reduced (6, 0));
+    widthSlider.setBounds (row2.removeFromLeft (row2Column).reduced (6, 0));
+    lowCutSlider.setBounds (row2.removeFromLeft (row2Column).reduced (6, 0));
+    highCutSlider.setBounds (row2.removeFromLeft (row2Column).reduced (6, 0));
     filterPosBox.setBounds (row2.withSizeKeepingCentre (juce::jmin (row2.getWidth() - 12, 200), 30));
 
     // Row 3: perform pad and its settings, in seven columns

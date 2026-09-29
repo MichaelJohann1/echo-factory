@@ -55,15 +55,15 @@ private:
     juce::ComboBox filterPosBox;
 
     PerformPad performPad;
-    AccessibleSlider throwLevelSlider, freezeFadeSlider, tapestopTimeSlider, runawayDriveSlider, wearSlider;
-    juce::Label throwLevelLabel, freezeFadeLabel, tapestopTimeLabel, runawayDriveLabel, wearLabel, inputModeLabel;
+    AccessibleSlider throwLevelSlider, freezeFadeSlider, tapestopTimeSlider, runawayDriveSlider, wearSlider, diffusionSlider;
+    juce::Label throwLevelLabel, freezeFadeLabel, tapestopTimeLabel, runawayDriveLabel, wearLabel, diffusionLabel, inputModeLabel;
     juce::ComboBox inputModeBox;
     juce::TextButton resetButton { "Reset" };
 
     std::unique_ptr<SliderAttachment> timeAttachment, smoothingAttachment, feedbackAttachment, mixAttachment;
     std::unique_ptr<SliderAttachment> widthAttachment, lowCutAttachment, highCutAttachment;
     std::unique_ptr<ButtonAttachment> syncButtonAttachment, pingPongButtonAttachment, freezeButtonAttachment;
-    std::unique_ptr<SliderAttachment> throwLevelAttachment, freezeFadeAttachment, tapestopTimeAttachment, runawayDriveAttachment, wearAttachment;
+    std::unique_ptr<SliderAttachment> throwLevelAttachment, freezeFadeAttachment, tapestopTimeAttachment, runawayDriveAttachment, wearAttachment, diffusionAttachment;
     std::unique_ptr<ComboBoxAttachment> filterPosAttachment, inputModeAttachment;
     std::unique_ptr<juce::ParameterAttachment> syncWatcher;
     bool showingSyncDivisions = false;

@@ -28,7 +28,7 @@ void check (const char* name, bool ok, const char* detail)
 struct Setup
 {
     int channels = 2;
-    float delayMs = 300.0f, feedback = 0.5f, wear = 0.0f, runawayDrive = 0.5f;
+    float delayMs = 300.0f, feedback = 0.5f, wear = 0.0f, runawayDrive = 0.5f, diffusion = 0.0f;
     bool pingPong = false, filters = false;
 };
 
@@ -45,6 +45,7 @@ std::vector<float> run (const Setup& s, float seconds, const Input& input, const
     e.setFiltersInFeedbackLoop (true); e.setFrozen (false); e.setFreezeFadeMs (20); e.setInputSend (1.0f);
     e.setPingPong (s.pingPong); e.setStereoWidthMs (0); e.setWear (s.wear);
     e.setRunaway (false); e.setRunawayDrive (s.runawayDrive); e.setTapestop (false); e.setTapestopTimeMs (500);
+    e.setReverse (false); e.setDiffusion (s.diffusion);
     e.reset();
 
     std::vector<float> out;
@@ -236,6 +237,233 @@ void testTapestop()
         check ("tapestop 5 s delay, 2 s stop, re-press: stable", maxStep (out) <= maxStep (ref) * 1.05f, d);
     }
 }
+
+void testDiffusion()
+{
+    char d[128];
+
+    {
+        // An impulse comes back as a smooth reverb tail: find RT60 from the
+        // backward-integrated energy decay, fitted between -5 and -35 dB. The
+        // network is set to 2 s at low frequencies and 0.8 s at the top; white
+        // noise's energy is mostly high, so broadband lands in between.
+        Setup s; s.channels = 1; s.delayMs = 100.0f; s.feedback = 0.0f; s.diffusion = 1.0f;
+        const auto out = run (s, 8.0f, [] (long n) { return n == 0 ? 1.0f : 0.0f; });
+        std::vector<double> decay (out.size());
+        double tail = 0.0;
+        for (size_t i = out.size(); i-- > 0;) { tail += (double) out[i] * out[i]; decay[i] = tail; }
+        const auto timeAt = [&] (double db)
+        {
+            for (size_t i = 0; i < decay.size(); ++i)
+                if (10.0 * std::log10 (decay[i] / decay[0]) <= db) return (float) i / sr;
+            return 1e9f;
+        };
+        const auto rt60 = 2.0f * (timeAt (-35.0) - timeAt (-5.0));
+        std::snprintf (d, sizeof d, "echo peak %.3f, energy %.3f, RT60 %.2f s", peak (out), decay[0], rt60);
+        check ("diffusion 1: impulse becomes a reverb tail", peak (out) < 0.5f && decay[0] > 0.5 && decay[0] < 2.0
+               && rt60 > 0.6f && rt60 < 3.0f, d);
+    }
+
+    {
+        // Repeats blur together. The level (dB per 10 ms window) over delay
+        // periods 4-11 is detrended (the wash decays smoothly overall). A repeat
+        // shows up as extra level just after each period starts, so this is the
+        // average level in the first 50 ms of each period minus the rest.
+        const auto pulseDb = [] (float diffusion, float delayMs)
+        {
+            Setup s; s.delayMs = delayMs; s.feedback = 0.7f; s.diffusion = diffusion;
+            const auto burst = [] (long n) { return n < (long) (0.05f * sr) ? juce::Random (7 + n * 7919).nextFloat() * 2.0f - 1.0f : 0.0f; };
+            const auto out = run (s, 13.0f * delayMs * 0.001f + 1.0f, burst);
+            const auto window = (size_t) (0.01f * sr);
+            const auto binsPerPeriod = (size_t) (delayMs / 10.0f);
+            const size_t firstPeriod = 4, numPeriods = 8, onsetBins = 5;
+
+            std::vector<double> level;
+            for (size_t w = 0; w < binsPerPeriod * numPeriods; ++w)
+            {
+                const auto start = firstPeriod * binsPerPeriod * window + w * window;
+                double e = 1e-20;
+                for (size_t i = start; i < start + window; ++i) e += (double) out[i] * out[i];
+                level.push_back (10.0 * std::log10 (e));
+            }
+
+            // Least-squares straight line through the dB curve.
+            const auto n = (double) level.size();
+            double sx = 0, sy = 0, sxx = 0, sxy = 0;
+            for (size_t i = 0; i < level.size(); ++i) { sx += (double) i; sy += level[i]; sxx += (double) i * (double) i; sxy += (double) i * level[i]; }
+            const auto slope = (n * sxy - sx * sy) / (n * sxx - sx * sx), intercept = (sy - slope * sx) / n;
+
+            double onset = 0.0, rest = 0.0;
+            for (size_t i = 0; i < level.size(); ++i)
+            {
+                const auto residual = level[i] - (intercept + slope * (double) i);
+                if (i % binsPerPeriod < onsetBins) onset += residual; else rest += residual;
+            }
+
+            onset /= (double) (onsetBins * numPeriods);
+            rest  /= (double) ((binsPerPeriod - onsetBins) * numPeriods);
+            return (float) std::min (60.0, onset - rest);
+        };
+
+        for (float delayMs : { 150.0f, 300.0f, 800.0f })
+        {
+            const auto clean = pulseDb (0.0f, delayMs), half = pulseDb (0.5f, delayMs), full = pulseDb (1.0f, delayMs);
+            std::snprintf (d, sizeof d, "onset lift per repeat: clean %.1f dB, 50%% %.1f dB, 100%% %.1f dB", clean, half, full);
+            char name[96];
+            std::snprintf (name, sizeof name, "diffusion 1, %d ms delay: repeats blur together", (int) delayMs);
+            check (name, full < 1.0f, d);
+        }
+    }
+
+    {
+        // At full diffusion, Feedback sets how long the reverb rings: RT60 should
+        // follow 3 x delay / -log10(feedback), within 2 s to 20 s. Measured on a
+        // low tone, since the top end is meant to die away faster.
+        for (float feedback : { 0.5f, 0.7f, 0.9f })
+        {
+            Setup s; s.channels = 1; s.feedback = feedback; s.diffusion = 1.0f;
+            const auto target = juce::jlimit (2.0f, 20.0f, 3.0f * 0.3f / -std::log10 (feedback));
+            const auto tone = [] (long n) { return n < (long) (0.3f * sr) ? 0.5f * std::sin (juce::MathConstants<float>::twoPi * 120.0f * (float) n / sr) : 0.0f; };
+            const auto out = run (s, 2.5f * target + 1.0f, tone);
+
+            std::vector<double> decay (out.size());
+            double tail = 0.0;
+            for (size_t i = out.size(); i-- > 0;) { tail += (double) out[i] * out[i]; decay[i] = tail; }
+            const auto start = (size_t) (1.0f * sr); // after the tone and the first pass
+            const auto timeAt = [&] (double db)
+            {
+                for (size_t i = start; i < decay.size(); ++i)
+                    if (10.0 * std::log10 (decay[i] / decay[start]) <= db) return (float) i / sr;
+                return 1e9f;
+            };
+            const auto rt60 = 3.0f * (timeAt (-25.0) - timeAt (-5.0));
+            char name[96];
+            std::snprintf (name, sizeof name, "diffusion 1, feedback %d%%: reverb length follows", (int) (feedback * 100.0f));
+            std::snprintf (d, sizeof d, "RT60 %.2f s, target %.2f s", rt60, target);
+            check (name, rt60 > 0.65f * target && rt60 < 1.35f * target, d);
+        }
+    }
+
+    {
+        // Level: at full diffusion a noise burst comes back as reverb at about
+        // the level it went in (make-up gain). Sweeping the knob fast stays
+        // bounded. The noise is the same on both channels, so the left output
+        // is compared with one channel's input.
+        const auto white = [] (long n)
+        {
+            // Hash of n (murmur finaliser), so every sample is independent and both channels match.
+            auto h = (juce::uint32) n * 0x9E3779B1u;
+            h ^= h >> 16; h *= 0x85EBCA6Bu; h ^= h >> 13; h *= 0xC2B2AE35u; h ^= h >> 16;
+            return (float) h / 2147483648.0f - 1.0f;
+        };
+        const auto burst = [white] (long n) { return n < (long) (2.0f * sr) ? white (n) : 0.0f; };
+        double inEnergy = 0.0;
+        for (long n = 0; n < (long) (2.0f * sr); ++n) inEnergy += (double) burst (n) * burst (n);
+
+        for (bool sweep : { false, true })
+        {
+            Setup s; s.feedback = 0.0f; s.diffusion = sweep ? 0.0f : 1.0f;
+            const auto out = run (s, 10.0f, burst, [sweep] (DelayEngine& e, float t)
+            {
+                if (sweep) e.setDiffusion ((int) (t * 20.0f) % 2 == 0 ? 1.0f : 0.0f);
+            });
+            double outEnergy = 0.0;
+            for (auto x : out) outEnergy += (double) x * x;
+            const auto ratioDb = 10.0 * std::log10 (outEnergy / inEnergy);
+            std::snprintf (d, sizeof d, "level %+.1f dB, peak %.3f", ratioDb, peak (out));
+            check (sweep ? "diffusion swept 0-1 every 50 ms: bounded" : "diffusion 1: comes out at about input level",
+                   sweep ? peak (out) < 2.0f : std::abs (ratioDb) < 3.0, d);
+        }
+    }
+
+    for (bool pingPong : { false, true })
+    {
+        // Smeared repeats overlap and stack like a reverb tail, so peaks can pass
+        // the input's. It must still decay, and stay within what the clean delay
+        // reaches with the same feedback and sustained input.
+        Setup s; s.feedback = 0.95f; s.diffusion = 1.0f; s.pingPong = pingPong;
+        const auto out = run (s, 30.0f, noiseBurst());
+        Setup clean = s; clean.diffusion = 0.0f;
+        const auto sustained = run (clean, 30.0f, loudNoise());
+        std::snprintf (d, sizeof d, "peak %.3f (clean, sustained %.3f), rms %.4f -> %.4f",
+                       peak (out), peak (sustained), rms (out, 10.0f, 11.0f), rms (out, 29.0f, 30.0f));
+        check (pingPong ? "diffusion 1, feedback 95%, ping-pong: decays" : "diffusion 1, feedback 95%: decays",
+               peak (out) < peak (sustained) && rms (out, 29.0f, 30.0f) < 0.05f
+               && rms (out, 29.0f, 30.0f) < rms (out, 10.0f, 11.0f), d);
+    }
+
+    {
+        // The reverb is outside the loop, so Runaway's loop is exactly as bounded
+        // as without it; the reverb only reshapes the wall (same level, but
+        // reverb-like peaks above its flat, saturated ones).
+        Setup s; s.diffusion = 1.0f; s.runawayDrive = 1.0f;
+        const auto press = [] (DelayEngine& e, float t) { e.setRunaway (t >= 0.5f); };
+        const auto out = run (s, 10.0f, loudNoise(), press);
+        Setup dry = s; dry.diffusion = 0.0f;
+        const auto plain = run (dry, 10.0f, loudNoise(), press);
+        const auto levelDb = 20.0f * std::log10 (rms (out, 2.0f, 10.0f) / rms (plain, 2.0f, 10.0f));
+        std::snprintf (d, sizeof d, "level vs no diffusion %+.1f dB, peak %.3f", levelDb, peak (out, 1.0f));
+        check ("diffusion 1 with runaway, loud input: bounded", std::abs (levelDb) < 3.0f && peak (out, 1.0f) < 2.0f, d);
+    }
+}
+
+void testReverse()
+{
+    char d[128];
+
+    {
+        // With no feedback the buffer holds the input exactly, so the reversed
+        // output can be checked sample by sample. At the centre of head A's window
+        // (phase L/2, reached at n = L/2 - 1 + kL from the press), the output is
+        // the input from 2 delay times ago, stepping backwards.
+        Setup s; s.channels = 1; s.delayMs = 100.0f; s.feedback = 0.0f;
+        const auto input = loudNoise();
+        std::vector<float> in;
+        for (long n = 0; n < (long) (1.0f * sr); ++n) in.push_back (input (n));
+        const auto out = run (s, 1.0f, [&in] (long n) { return in[(size_t) n]; },
+                              [] (DelayEngine& e, float) { e.setReverse (true); });
+
+        const long segment = 4800, centre = segment / 2 - 1 + 3 * segment;
+        float worst = 0.0f;
+        for (long j = -5; j <= 5; ++j)
+            worst = std::max (worst, std::abs (out[(size_t) (centre + j)] - in[(size_t) (centre - 2 * segment - j)]));
+        std::snprintf (d, sizeof d, "worst error %.2e", worst);
+        check ("reverse: plays the buffer exactly backwards", worst < 1e-3f, d);
+    }
+
+    for (bool filters : { false, true })
+    {
+        Setup s; s.filters = filters;
+        const auto ref = run (s, 4.0f, sine());
+        const auto out = run (s, 4.0f, sine(), [] (DelayEngine& e, float t) { e.setReverse (t >= 1.0f && t < 2.0f); });
+        const auto tol = filters ? 1e-3f : 1e-6f;
+        std::snprintf (d, sizeof d, "diff after 2.5 s %.2e, max step %.4f (reference %.4f)", maxDiff (out, ref, 2.5f), maxStep (out), maxStep (ref));
+        check (filters ? "reverse, filters on: exactly back, no clicks" : "reverse: exactly back, no clicks",
+               maxDiff (out, ref, 2.5f) < tol && maxStep (out) <= maxStep (ref) * 1.1f, d);
+    }
+
+    {
+        Setup s;
+        const auto frozenRef = run (s, 6.0f, sine(), [] (DelayEngine& e, float t) { e.setFrozen (t >= 1.0f); });
+        const auto out = run (s, 6.0f, sine(), [] (DelayEngine& e, float t) { e.setFrozen (t >= 1.0f); e.setReverse (t >= 3.0f && t < 4.0f); });
+        std::snprintf (d, sizeof d, "diff after 4.5 s %.2e, max step %.4f", maxDiff (out, frozenRef, 4.5f), maxStep (out));
+        check ("reverse while frozen: same loop comes back", maxDiff (out, frozenRef, 4.5f) < 1e-6f
+               && maxStep (out) <= maxStep (frozenRef) * 1.1f, d);
+    }
+
+    {
+        Setup s; s.delayMs = 5000.0f; s.feedback = 0.9f;
+        const auto ref = run (s, 20.0f, sine());
+        const auto out = run (s, 20.0f, sine(), [] (DelayEngine& e, float t)
+        {
+            e.setReverse (t >= 5.0f && t < 15.0f);
+            e.setTapestop ((t >= 7.0f && t < 9.0f) || (t >= 14.5f && t < 16.0f));
+        });
+        std::snprintf (d, sizeof d, "max step %.4f (reference %.4f)", maxStep (out), maxStep (ref));
+        check ("reverse with tapestop, 5 s delay: stable", maxStep (out) <= maxStep (ref) * 1.1f, d);
+    }
+}
+
 }
 
 int main()
@@ -244,6 +472,8 @@ int main()
     testRunaway();
     testWear();
     testTapestop();
+    testDiffusion();
+    testReverse();
 
     std::printf ("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

@@ -33,6 +33,7 @@ namespace Params
 
         // Character
         inline const juce::ParameterID wear         { "wear",         1 };
+        inline const juce::ParameterID diffusion    { "diffusion",    1 };
     }
 
     /** The performance gestures, in MIDI note order (Throw, Freeze, Tapestop, Runaway, Reverse). */

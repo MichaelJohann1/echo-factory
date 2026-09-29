@@ -24,6 +24,26 @@ namespace
     constexpr float silentBelow   = 0.3f;  // speed under which the output fades out
     constexpr float spliceMs      = 50.0f;
 
+    // Reverb line lengths in ms (left, right: different for a wide, decorrelated wash).
+    constexpr float diffuserMs[2][DiffusionNetwork::numLines] {
+        { 15.1f, 17.9f, 20.3f, 22.7f, 25.3f, 27.9f, 30.7f, 33.1f, 36.1f, 38.9f, 41.3f, 44.3f, 47.1f, 50.9f, 54.1f, 57.7f },
+        { 16.3f, 18.7f, 21.1f, 23.9f, 26.3f, 29.1f, 31.9f, 34.3f, 37.1f, 39.7f, 42.7f, 45.1f, 48.3f, 51.7f, 55.3f, 58.9f },
+    };
+    // Pre-diffuser allpass lengths in ms (left, right).
+    constexpr float preDiffuserMs[2][DiffusionNetwork::numPreStages] {
+        { 17.3f, 29.1f, 43.7f, 61.3f },
+        { 19.1f, 31.3f, 41.9f, 58.7f },
+    };
+
+    // Diffusion turns the delay into a reverb. With the square of the knob, the
+    // delay's own feedback is handed over to the reverb's tail, whose length
+    // grows from a small room to the decay the feedback would have given
+    // (RT60 at low frequencies, at least 2 s, at most 20 s; the top end dies
+    // away twice as fast). At full, the delay feeds the reverb once and Feedback
+    // sets how long it rings, so there are no separate repeats left to hear.
+    constexpr float minDiffusionRt60 = 0.3f, roomDiffusionRt60 = 2.0f, maxDiffusionRt60 = 20.0f;
+    constexpr float diffusionHighRatio = 0.5f;
+
     float onePoleCoef (float hz, double sampleRate)
     {
         return 1.0f - std::exp (-juce::MathConstants<float>::twoPi * hz / (float) sampleRate);
@@ -35,8 +55,10 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     sampleRate = newSampleRate;
     maxDelaySamples = (float) (maxDelayMs * 0.001 * sampleRate);
 
-    // Headroom for the tapestop head, which trails by up to the stop plus spin-up growth.
-    maxReadSamples = maxDelaySamples + (float) ((maxTapestopMs * (1.0f + spinUpRatio) * 0.5f + 10.0f) * 0.001 * sampleRate);
+    // The output head reads up to three delay times back while reversing (the
+    // segment is read backwards from one to three delay times), plus the
+    // tapestop head's trail of up to the stop plus spin-up growth.
+    maxReadSamples = 3.0f * maxDelaySamples + (float) ((maxTapestopMs * (1.0f + spinUpRatio) * 0.5f + 10.0f) * 0.001 * sampleRate);
     delayLine.setMaximumDelayInSamples ((int) std::ceil (maxReadSamples) + 2);
     const juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) maxBlockSize, (juce::uint32) juce::jmax (1, numChannels) };
     delayLine.prepare (spec);
@@ -55,6 +77,12 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     highCutOutFilter.prepare (spec);
 
     spliceStep = 1.0f / (spliceMs * 0.001f * (float) sampleRate);
+
+    for (size_t ch = 0; ch < 2; ++ch)
+        diffusers[ch].prepare (diffuserMs[ch], preDiffuserMs[ch], sampleRate);
+
+    diffusion.reset (sampleRate, 0.05);
+    reverseAmount.reset (sampleRate, 0.03);
     setTapestopTimeMs (500.0f);
 
     delaySmoothingSamples = -1; // forces the ramp length to be recalculated for this sample rate
@@ -110,6 +138,17 @@ void DelayEngine::reset()
 
     wowPhase = flutterPhase = drift = driftTarget = 0.0f;
     driftCountdown = 0;
+
+    diffusion.setCurrentAndTargetValue (diffusion.getTargetValue());
+    reverseAmount.setCurrentAndTargetValue (reverseHeld ? 1.0f : 0.0f);
+    reverseMix = reverseAmount.getCurrentValue();
+    reversePhase = 0.0f;
+
+    for (auto& network : diffusers)
+        network.clear();
+
+    diffusionActive = false;
+    diffusionRt60 = 0.0f; // forces the tail length to be recalculated
 
     tapeSpeed = tapestopHeld ? 0.0f : 1.0f;
     tapeOffset = spliceAmount = spliceOffset = 0.0f;
@@ -242,17 +281,62 @@ void DelayEngine::advanceTapestop (float delay)
     spliceAmount = juce::jmax (0.0f, spliceAmount - spliceStep);
 }
 
+void DelayEngine::advanceReverse (float delay)
+{
+    // Start each press at the top of a segment, but only from fully forward
+    // so an in-progress crossfade doesn't jump.
+    if (reverseHeld && reverseMix <= 0.0f)
+        reversePhase = 0.0f;
+
+    reverseAmount.setTargetValue (reverseHeld ? 1.0f : 0.0f);
+    reverseMix = reverseAmount.getNextValue();
+
+    // The heads move backwards at tape speed, so Tapestop slows them too.
+    const auto segment = juce::jmax (2.0f, delay);
+    reversePhase += tapeSpeed;
+
+    while (reversePhase >= segment)
+        reversePhase -= segment;
+}
+
 float DelayEngine::readHeard (int channel, float delay)
 {
-    auto heard = delayLine.popSample (channel, juce::jlimit (1.0f, maxReadSamples, delay + tapeOffset), false);
+    const auto read = [this, channel] (float d)
+    {
+        return delayLine.popSample (channel, juce::jlimit (1.0f, maxReadSamples, d), false);
+    };
+
+    auto heard = read (delay + tapeOffset);
 
     if (spliceAmount > 0.0f)
+        heard += spliceAmount * (read (delay + spliceOffset) - heard);
+
+    if (reverseMix > 0.0f)
     {
-        const auto old = delayLine.popSample (channel, juce::jlimit (1.0f, maxReadSamples, delay + spliceOffset), false);
-        heard += spliceAmount * (old - heard);
+        // Reading 2 samples further back for every sample forward plays the
+        // segment backwards. Head B is half a segment behind head A; their
+        // sin² windows sum to 1, so segment boundaries are never heard.
+        const auto segment = juce::jmax (2.0f, delay);
+        const auto phaseA = reversePhase;
+        const auto phaseB = std::fmod (reversePhase + 0.5f * segment, segment);
+        const auto windowA = juce::square (std::sin (juce::MathConstants<float>::pi * phaseA / segment));
+
+        const auto reversed = windowA * read (delay + tapeOffset + 2.0f * phaseA)
+                            + (1.0f - windowA) * read (delay + tapeOffset + 2.0f * phaseB);
+
+        heard += reverseMix * (reversed - heard);
     }
 
     return heard;
+}
+
+float DelayEngine::reverberate (int channel, float echo)
+{
+    if (! diffusionActive)
+        return echo;
+
+    const auto reverb = diffusers[(size_t) channel].process (echo) * diffusionMakeup;
+    return diffusionCos * echo + diffusionSin * reverb;
 }
 
 float DelayEngine::tape (int channel, float sample, float amount, float ceiling, float darken)
@@ -286,7 +370,10 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
         // the loop bounded at the ceiling. The saturator comes in twice as fast as
         // the feedback, so it's fully in before feedback passes 100% and loud input
         // can't overshoot on the way in.
-        const auto fb = feedback.getNextValue() * (1.0f - runaway)
+        const auto diffusionNow = diffusion.getNextValue();
+        const auto handover = diffusionNow * diffusionNow; // share of the sustain given to the reverb
+        const auto feedbackNow = feedback.getNextValue();
+        const auto fb = feedbackNow * (1.0f - runaway) * (1.0f - handover)
                       + runaway * (runawayMinFeedback + runawayFeedbackRange * drive);
         const auto tapeAmount = juce::jmax (wearNow, juce::jmin (1.0f, 2.0f * runaway));
         const auto ceiling = (1.0f - (1.0f - wearMinCeiling) * wearNow) * (1.0f - runaway)
@@ -337,6 +424,45 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
         }
 
         advanceTapestop (d);
+        advanceReverse (d);
+        // Diffusion blends the echoes into the reverb with an equal-power
+        // crossfade. At 0 the reverb is out of the path; its tail is cleared.
+        if (diffusionNow > 0.0f)
+        {
+            if (! diffusionActive || ! juce::exactlyEqual (diffusionNow, diffusionSetting))
+            {
+                const auto theta = diffusionNow * juce::MathConstants<float>::halfPi;
+                diffusionCos = std::cos (theta);
+                diffusionSin = std::sin (theta);
+                diffusionSetting = diffusionNow;
+            }
+
+            // The decay the delay's feedback gives: 60 dB at -20 log10(fb) dB per period.
+            const auto delaySeconds = delaySamples.getCurrentValue() / (float) sampleRate;
+            const auto feedbackRt60 = feedbackNow > 0.001f ? 3.0f * delaySeconds / -std::log10 (feedbackNow) : 0.0f;
+            const auto washRt60 = juce::jlimit (roomDiffusionRt60, maxDiffusionRt60, feedbackRt60);
+            const auto rt60 = minDiffusionRt60 + (washRt60 - minDiffusionRt60) * handover;
+
+            // Recalculated when the tail length moves by more than 1%.
+            if (std::abs (rt60 - diffusionRt60) > 0.01f * diffusionRt60)
+            {
+                for (auto& network : diffusers)
+                    network.setDecay (rt60, diffusionHighRatio);
+
+                diffusionMakeup = diffusers[0].getMakeup();
+
+                diffusionRt60 = rt60;
+            }
+
+            diffusionActive = true;
+        }
+        else if (diffusionActive)
+        {
+            for (auto& network : diffusers)
+                network.clear();
+
+            diffusionActive = false;
+        }
         const auto tapeGain = tapeSpeed >= silentBelow ? 1.0f
                             : [] (float x) { return x * x * (3.0f - 2.0f * x); } (tapeSpeed / silentBelow);
 
@@ -350,11 +476,12 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
                 const auto delayed = delayLine.popSample (ch, d);
 
                 const auto echo = filter (ch, delayed);
-                const auto normalWrite = tape (ch, send * dry + fb * (filtersInLoop ? echo : delayed), tapeAmount, ceiling, darken);
+                const auto normalWrite = tape (ch, send * dry + fb * (filtersInLoop ? echo : delayed),
+                                               tapeAmount, ceiling, darken);
 
                 delayLine.pushSample (ch, normalWrite + frozen * (delayed - normalWrite));
 
-                data[i] = dry * (1.0f - wet) + tapeGain * outputFilter (ch, heard) * wet;
+                data[i] = dry * (1.0f - wet) + reverberate (ch, tapeGain * outputFilter (ch, heard)) * wet;
             }
 
             continue;
@@ -380,11 +507,13 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
 
         for (int ch = 0; ch < 2; ++ch)
         {
-            const auto write = tape (ch, normalWrite[ch] + pingPong * (pingPongWrite[ch] - normalWrite[ch]), tapeAmount, ceiling, darken);
+            const auto mixed = normalWrite[ch] + pingPong * (pingPongWrite[ch] - normalWrite[ch]);
+            const auto write = tape (ch, mixed, tapeAmount, ceiling, darken);
             delayLine.pushSample (ch, write + frozen * (frozenWrite[ch] - write));
         }
 
-        const float heardEcho[2] { tapeGain * outputFilter (0, heard[0]), tapeGain * outputFilter (1, heard[1]) };
+        const float heardEcho[2] { reverberate (0, tapeGain * outputFilter (0, heard[0])),
+                                   reverberate (1, tapeGain * outputFilter (1, heard[1])) };
 
         widthDelayLine.pushSample (0, heardEcho[1]);
         const auto rightEcho = widthDelayLine.popSample (0, width);

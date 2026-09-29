@@ -105,6 +105,7 @@ private:
     std::atomic<float>* runawayDriveParam = nullptr;
     std::atomic<float>* tapestopTimeParam = nullptr;
     std::atomic<float>* wearParam         = nullptr;
+    std::atomic<float>* diffusionParam    = nullptr;
 
     double hostBpm = 120.0;
 
