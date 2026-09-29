@@ -283,11 +283,12 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
         const auto drive   = runawayDrive.getNextValue();
 
         // Runaway takes feedback past 100% and the saturator fully in, which keeps
-        // the loop bounded at the ceiling. Ramping both together keeps it bounded
-        // on the way in too: the linear part of the loop gain stays below 1.
+        // the loop bounded at the ceiling. The saturator comes in twice as fast as
+        // the feedback, so it's fully in before feedback passes 100% and loud input
+        // can't overshoot on the way in.
         const auto fb = feedback.getNextValue() * (1.0f - runaway)
                       + runaway * (runawayMinFeedback + runawayFeedbackRange * drive);
-        const auto tapeAmount = juce::jmax (wearNow, runaway);
+        const auto tapeAmount = juce::jmax (wearNow, juce::jmin (1.0f, 2.0f * runaway));
         const auto ceiling = (1.0f - (1.0f - wearMinCeiling) * wearNow) * (1.0f - runaway)
                            + runaway * (runawayMaxCeiling - runawayCeilingRange * drive);
         const auto darken = juce::jmax (wearNow, 0.5f * runaway);
