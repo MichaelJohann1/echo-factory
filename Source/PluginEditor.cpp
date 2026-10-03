@@ -30,6 +30,19 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     presetBar.onSaveRequested = [this] { showSaveDialog(); };
     addAndMakeVisible (presetBar);
 
+    // ---- Screen-reader groups -------------------------------------------
+    // Focus order numbers inside a group are local to it.
+    delayGroup.setExplicitFocusOrder (3);
+    characterGroup.setExplicitFocusOrder (4);
+    filtersGroup.setExplicitFocusOrder (5);
+    gestureGroup.setExplicitFocusOrder (6);
+    modesGroup.setExplicitFocusOrder (3); // inside the Delay group, between Smoothing and Feedback
+
+    for (auto* group : { &delayGroup, &characterGroup, &filtersGroup, &gestureGroup })
+        addAndMakeVisible (group);
+
+    delayGroup.addAndMakeVisible (modesGroup);
+
     // ---- Perform pad -----------------------------------------------------
     // First after the preset bar, so it's one Tab from the top.
     performPad.setTitle ("Perform mode");
@@ -51,24 +64,25 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
 
     // ---- Delay time / division ------------------------------------------
     timeLabel.attachToComponent (&timeSlider, false);
+    timeLabel.setAccessible (false); // the knob's title already says it
     timeLabel.setJustificationType (juce::Justification::centred);
-    timeSlider.setExplicitFocusOrder (3);
-    addAndMakeVisible (timeSlider);
+    timeSlider.setExplicitFocusOrder (1);
+    delayGroup.addAndMakeVisible (timeSlider);
 
     // ---- Time smoothing --------------------------------------------------
-    setupSlider (smoothingSlider, smoothingLabel, "Smoothing",
+    setupSlider (delayGroup, smoothingSlider, smoothingLabel, "Smoothing",
                  "How long the delay time takes to glide to a new setting, from 0 milliseconds (instant) to 2 seconds. "
                  "Longer settings give a smoother, tape-like pitch bend.");
     smoothingSlider.spokenTextFromValue = [] (double v) { return Params::formatMilliseconds ((float) v, true); };
-    smoothingSlider.setExplicitFocusOrder (4);
+    smoothingSlider.setExplicitFocusOrder (2);
     smoothingAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::timeSmoothingMs.getParamID(), smoothingSlider);
 
     // ---- Sync ------------------------------------------------------------
     syncButton.setTitle ("Sync to host tempo");
     syncButton.setDescription ("When on, the delay time follows the host tempo as a note division.");
     syncButton.setWantsKeyboardFocus (true);
-    syncButton.setExplicitFocusOrder (5);
-    addAndMakeVisible (syncButton);
+    syncButton.setExplicitFocusOrder (1);
+    modesGroup.addAndMakeVisible (syncButton);
     syncButtonAttachment = std::make_unique<ButtonAttachment> (p.apvts, Params::ID::sync.getParamID(), syncButton);
 
     // ---- Ping-pong -------------------------------------------------------
@@ -76,8 +90,8 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     pingPongButton.setDescription ("When on, echoes bounce between left and right, starting on the left. "
                                    "With feedback at zero you hear two repeats, one left and one right. Stereo only.");
     pingPongButton.setWantsKeyboardFocus (true);
-    pingPongButton.setExplicitFocusOrder (6);
-    addAndMakeVisible (pingPongButton);
+    pingPongButton.setExplicitFocusOrder (2);
+    modesGroup.addAndMakeVisible (pingPongButton);
     pingPongButtonAttachment = std::make_unique<ButtonAttachment> (p.apvts, Params::ID::pingPong.getParamID(), pingPongButton);
 
     // ---- Freeze ----------------------------------------------------------
@@ -85,8 +99,8 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     freezeButton.setDescription ("When on, the delay stops taking in new audio and repeats what is in the buffer "
                                  "forever without fading. The dry signal still passes through.");
     freezeButton.setWantsKeyboardFocus (true);
-    freezeButton.setExplicitFocusOrder (7);
-    addAndMakeVisible (freezeButton);
+    freezeButton.setExplicitFocusOrder (3);
+    modesGroup.addAndMakeVisible (freezeButton);
     freezeButtonAttachment = std::make_unique<ButtonAttachment> (p.apvts, Params::ID::freeze.getParamID(), freezeButton);
 
     // Follows the sync parameter whether it's changed here, by automation or by a preset.
@@ -96,108 +110,110 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     syncWatcher->sendInitialUpdate();
 
     // ---- Feedback / Mix --------------------------------------------------
-    setupPercentSlider (feedbackSlider, feedbackLabel, "Feedback", "Amount of the echo fed back into the delay, 0 to 95 percent.");
-    feedbackSlider.setExplicitFocusOrder (8);
+    setupPercentSlider (delayGroup, feedbackSlider, feedbackLabel, "Feedback", "Amount of the echo fed back into the delay, 0 to 95 percent.");
+    feedbackSlider.setExplicitFocusOrder (4);
     feedbackAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::feedback.getParamID(), feedbackSlider);
 
-    setupPercentSlider (mixSlider, mixLabel, "Mix", "Balance between the dry and delayed signal, 0 to 100 percent.");
-    mixSlider.setExplicitFocusOrder (9);
+    setupPercentSlider (delayGroup, mixSlider, mixLabel, "Mix", "Balance between the dry and delayed signal, 0 to 100 percent.");
+    mixSlider.setExplicitFocusOrder (5);
     mixAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::mix.getParamID(), mixSlider);
 
     // ---- Wear ------------------------------------------------------------
-    setupPercentSlider (wearSlider, wearLabel, "Wear",
+    setupPercentSlider (characterGroup, wearSlider, wearLabel, "Wear",
                         "Tape wear, 0 to 100 percent: saturation, darkening and wow and flutter on the echoes, "
                         "building up with each repeat. At 0 the delay is clean.");
-    wearSlider.setExplicitFocusOrder (10);
+    wearSlider.setExplicitFocusOrder (1);
     wearAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::wear.getParamID(), wearSlider);
 
     // ---- Diffusion -------------------------------------------------------
-    setupPercentSlider (diffusionSlider, diffusionLabel, "Diffusion",
+    setupPercentSlider (characterGroup, diffusionSlider, diffusionLabel, "Diffusion",
                         "Turns the echoes into a reverb, 0 to 100 percent. At full there are no separate repeats, "
                         "and Feedback sets how long the reverb lasts. Combine with Freeze for pads. At 0 the echoes are clean.");
-    diffusionSlider.setExplicitFocusOrder (11);
+    diffusionSlider.setExplicitFocusOrder (2);
     diffusionAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::diffusion.getParamID(), diffusionSlider);
 
     // ---- Stereo width ----------------------------------------------------
-    setupSlider (widthSlider, widthLabel, "Stereo Width",
+    setupSlider (characterGroup, widthSlider, widthLabel, "Stereo Width",
                  "Delays the right channel of the echoes by 0 to 100 milliseconds to widen them. "
                  "Does not affect the dry signal. Stereo only.");
     widthSlider.spokenTextFromValue = [] (double v) { return Params::formatMilliseconds ((float) v, true); };
-    widthSlider.setExplicitFocusOrder (12);
+    widthSlider.setExplicitFocusOrder (3);
     widthAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::stereoWidthMs.getParamID(), widthSlider);
 
     // ---- Filters ---------------------------------------------------------
-    setupFrequencySlider (lowCutSlider, lowCutLabel, "Low Cut",
+    setupFrequencySlider (filtersGroup, lowCutSlider, lowCutLabel, "Low Cut",
                           "High-pass filter on the echoes, off or 21 hertz to 2 kilohertz. Turn fully down for off.",
                           Params::lowCutMinHz);
-    lowCutSlider.setExplicitFocusOrder (13);
+    lowCutSlider.setExplicitFocusOrder (1);
     lowCutAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::lowCut.getParamID(), lowCutSlider);
 
-    setupFrequencySlider (highCutSlider, highCutLabel, "High Cut",
+    setupFrequencySlider (filtersGroup, highCutSlider, highCutLabel, "High Cut",
                           "Low-pass filter on the echoes, 500 hertz to 20 kilohertz or off. Turn fully up for off.",
                           Params::highCutMaxHz);
-    highCutSlider.setExplicitFocusOrder (14);
+    highCutSlider.setExplicitFocusOrder (2);
     highCutAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::highCut.getParamID(), highCutSlider);
 
     filterPosLabel.setText ("Filter Position", juce::dontSendNotification);
     filterPosLabel.setJustificationType (juce::Justification::centred);
     filterPosLabel.attachToComponent (&filterPosBox, false);
+    filterPosLabel.setAccessible (false);
     filterPosBox.addItemList (Params::getFilterPositionNames(), 1);
     filterPosBox.setTitle ("Filter Position");
     filterPosBox.setDescription ("In Feedback Loop filters every repeat, so echoes get progressively darker or thinner. "
                                  "Output Only filters the echoes once, without changing the feedback.");
     filterPosBox.setWantsKeyboardFocus (true);
-    filterPosBox.setExplicitFocusOrder (15);
-    addAndMakeVisible (filterPosBox);
+    filterPosBox.setExplicitFocusOrder (3);
+    filtersGroup.addAndMakeVisible (filterPosBox);
     filterPosAttachment = std::make_unique<ComboBoxAttachment> (p.apvts, Params::ID::filterPos.getParamID(), filterPosBox);
 
     // ---- Perform settings ------------------------------------------------
     inputModeLabel.setText ("Input", juce::dontSendNotification);
     inputModeLabel.setJustificationType (juce::Justification::centred);
     inputModeLabel.attachToComponent (&inputModeBox, false);
+    inputModeLabel.setAccessible (false);
     inputModeBox.addItemList (Params::getInputModeNames(), 1);
     inputModeBox.setTitle ("Input");
     inputModeBox.setDescription ("Always sends the input into the delay. "
                                  "Throw Only sends it in only while Throw is held or latched.");
     inputModeBox.setWantsKeyboardFocus (true);
-    inputModeBox.setExplicitFocusOrder (16);
-    addAndMakeVisible (inputModeBox);
+    inputModeBox.setExplicitFocusOrder (1);
+    gestureGroup.addAndMakeVisible (inputModeBox);
     inputModeAttachment = std::make_unique<ComboBoxAttachment> (p.apvts, Params::ID::inputMode.getParamID(), inputModeBox);
 
-    setupSlider (throwLevelSlider, throwLevelLabel, "Throw Level",
+    setupSlider (gestureGroup, throwLevelSlider, throwLevelLabel, "Throw Level",
                  "Level of the input sent into the delay while Throw is on, minus 12 to plus 12 decibels.");
     throwLevelSlider.spokenTextFromValue = [] (double v) { return Params::formatDecibels ((float) v, true); };
     throwLevelSlider.setNumKeyboardSteps (24);
-    throwLevelSlider.setExplicitFocusOrder (17);
+    throwLevelSlider.setExplicitFocusOrder (2);
     throwLevelAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::throwLevelDb.getParamID(), throwLevelSlider);
 
-    setupSlider (freezeFadeSlider, freezeFadeLabel, "Freeze Fade",
+    setupSlider (gestureGroup, freezeFadeSlider, freezeFadeLabel, "Freeze Fade",
                  "How long Freeze takes to fade in and out, from 10 milliseconds to 2 seconds. "
                  "Long fades swell into the frozen sound.");
     freezeFadeSlider.spokenTextFromValue = [] (double v) { return Params::formatMilliseconds ((float) v, true); };
-    freezeFadeSlider.setExplicitFocusOrder (18);
+    freezeFadeSlider.setExplicitFocusOrder (3);
     freezeFadeAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::freezeFadeMs.getParamID(), freezeFadeSlider);
 
-    setupSlider (tapestopTimeSlider, tapestopTimeLabel, "Tapestop Time",
+    setupSlider (gestureGroup, tapestopTimeSlider, tapestopTimeLabel, "Tapestop Time",
                  "How long Tapestop takes to slow the echoes to a stop, from 100 milliseconds to 2 seconds. "
                  "Spinning back up takes half as long.");
     tapestopTimeSlider.spokenTextFromValue = [] (double v) { return Params::formatMilliseconds ((float) v, true); };
-    tapestopTimeSlider.setExplicitFocusOrder (19);
+    tapestopTimeSlider.setExplicitFocusOrder (4);
     tapestopTimeAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::tapestopTimeMs.getParamID(), tapestopTimeSlider);
 
-    setupPercentSlider (runawayDriveSlider, runawayDriveLabel, "Runaway Drive",
+    setupPercentSlider (gestureGroup, runawayDriveSlider, runawayDriveLabel, "Runaway Drive",
                         "How hard Runaway pushes, 0 to 100 percent: feedback from 110 to 160 percent into the saturator. "
                         "Higher builds faster and distorts harder.");
-    runawayDriveSlider.setExplicitFocusOrder (20);
+    runawayDriveSlider.setExplicitFocusOrder (5);
     runawayDriveAttachment = std::make_unique<SliderAttachment> (p.apvts, Params::ID::runawayDrive.getParamID(), runawayDriveSlider);
 
     resetButton.setTitle ("Reset");
     resetButton.setDescription ("Releases every gesture and latch, including Freeze, and undoes "
                                 "feedback and delay time changes made with the arrow keys in Perform mode.");
     resetButton.setWantsKeyboardFocus (true);
-    resetButton.setExplicitFocusOrder (21);
+    resetButton.setExplicitFocusOrder (6);
     resetButton.onClick = [this] { processorRef.resetPerformance(); };
-    addAndMakeVisible (resetButton);
+    gestureGroup.addAndMakeVisible (resetButton);
 
     // Announced however the reset happened: button, Backspace, host or MIDI.
     p.onPerformanceReset = []
@@ -231,30 +247,31 @@ EchoFactoryEditor::~EchoFactoryEditor()
         saveDialog->exitModalState (0);
 }
 
-void EchoFactoryEditor::setupSlider (AccessibleSlider& slider, juce::Label& label,
+void EchoFactoryEditor::setupSlider (ControlGroup& group, AccessibleSlider& slider, juce::Label& label,
                                     const juce::String& name, const juce::String& description)
 {
     label.setText (name, juce::dontSendNotification);
     label.setJustificationType (juce::Justification::centred);
     label.attachToComponent (&slider, false);
+    label.setAccessible (false); // on-screen only; the slider's title is what gets spoken
 
     slider.setTitle (name);
     slider.setDescription (description);
     slider.setNumKeyboardSteps (100);
-    addAndMakeVisible (slider);
+    group.addAndMakeVisible (slider);
 }
 
-void EchoFactoryEditor::setupPercentSlider (AccessibleSlider& slider, juce::Label& label,
+void EchoFactoryEditor::setupPercentSlider (ControlGroup& group, AccessibleSlider& slider, juce::Label& label,
                                            const juce::String& name, const juce::String& description)
 {
-    setupSlider (slider, label, name, description);
+    setupSlider (group, slider, label, name, description);
     slider.spokenTextFromValue = [] (double v) { return juce::String (juce::roundToInt (v)) + " percent"; };
 }
 
-void EchoFactoryEditor::setupFrequencySlider (AccessibleSlider& slider, juce::Label& label, const juce::String& name,
+void EchoFactoryEditor::setupFrequencySlider (ControlGroup& group, AccessibleSlider& slider, juce::Label& label, const juce::String& name,
                                              const juce::String& description, float offHz)
 {
-    setupSlider (slider, label, name, description);
+    setupSlider (group, slider, label, name, description);
     slider.spokenTextFromValue = [offHz] (double v) { return Params::formatFrequency ((float) v, offHz, true); };
 }
 
@@ -329,14 +346,8 @@ void EchoFactoryEditor::showSaveDialog()
 
 void EchoFactoryEditor::setMainControlsVisible (bool shouldBeVisible)
 {
-    for (auto* c : std::initializer_list<juce::Component*> { &presetBar, &timeSlider, &smoothingSlider, &syncButton, &pingPongButton, &freezeButton, &feedbackSlider, &mixSlider,
-                                                            &timeLabel, &smoothingLabel, &feedbackLabel, &mixLabel,
-                                                            &widthSlider, &lowCutSlider, &highCutSlider, &filterPosBox,
-                                                            &widthLabel, &lowCutLabel, &highCutLabel, &filterPosLabel,
-                                                            &performPad, &throwLevelSlider, &freezeFadeSlider, &inputModeBox, &resetButton,
-                                                            &throwLevelLabel, &freezeFadeLabel, &inputModeLabel,
-                                                            &wearSlider, &wearLabel, &runawayDriveSlider, &runawayDriveLabel,
-                                                            &tapestopTimeSlider, &tapestopTimeLabel, &diffusionSlider, &diffusionLabel })
+    // The groups take their controls and labels with them.
+    for (auto* c : std::initializer_list<juce::Component*> { &presetBar, &performPad, &delayGroup, &characterGroup, &filtersGroup, &gestureGroup })
         c->setVisible (shouldBeVisible);
 }
 
@@ -375,7 +386,8 @@ void EchoFactoryEditor::paint (juce::Graphics& g)
     // Dividers above the character/filter row and the perform row.
     g.setColour (Colours::topBar);
 
-    for (auto dividerY : { (float) wearLabel.getY() - 10.0f, (float) performPad.getY() - 10.0f })
+    // The wear label is positioned inside its group.
+    for (auto dividerY : { (float) (characterGroup.getY() + wearLabel.getY()) - 10.0f, (float) performPad.getY() - 10.0f })
         g.drawLine (16.0f, dividerY, (float) getWidth() - 16.0f, dividerY, 1.5f);
 }
 
@@ -405,13 +417,18 @@ void EchoFactoryEditor::resized()
 
     area.reduce (16, 16);
 
+    // Each group spans its row including the label strip above its controls,
+    // and lays its children out in its own coordinates.
+
     // Row 1: delay controls
-    auto row1 = area.removeFromTop (area.getHeight() / 3).withTrimmedTop (24).withTrimmedBottom (8); // top: room for labels
+    delayGroup.setBounds (area.removeFromTop (area.getHeight() / 3).withTrimmedBottom (8));
+    auto row1 = delayGroup.getLocalBounds().withTrimmedTop (24); // room for labels
     const auto columnWidth = row1.getWidth() / 5;
 
     timeSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
     smoothingSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
-    auto toggles = row1.removeFromLeft (columnWidth).withSizeKeepingCentre (columnWidth - 12, 120);
+    modesGroup.setBounds (row1.removeFromLeft (columnWidth).withSizeKeepingCentre (columnWidth - 12, 120));
+    auto toggles = modesGroup.getLocalBounds();
     syncButton.setBounds (toggles.removeFromTop (40));
     toggles.removeFromTop (4);
     pingPongButton.setBounds (toggles.removeFromTop (36));
@@ -420,28 +437,34 @@ void EchoFactoryEditor::resized()
     feedbackSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
     mixSlider.setBounds (row1.reduced (6, 0));
 
-    // Row 2: character, stereo width and filters, in six columns
-    auto row2 = area.removeFromTop (area.getHeight() / 2).withTrimmedTop (32).withTrimmedBottom (8); // separator line + labels
+    // Row 2: character (three columns) and filters (three columns)
+    auto row2 = area.removeFromTop (area.getHeight() / 2).withTrimmedTop (8).withTrimmedBottom (8); // separator line
     const auto row2Column = row2.getWidth() / 6;
 
-    wearSlider.setBounds (row2.removeFromLeft (row2Column).reduced (6, 0));
-    diffusionSlider.setBounds (row2.removeFromLeft (row2Column).reduced (6, 0));
-    widthSlider.setBounds (row2.removeFromLeft (row2Column).reduced (6, 0));
-    lowCutSlider.setBounds (row2.removeFromLeft (row2Column).reduced (6, 0));
-    highCutSlider.setBounds (row2.removeFromLeft (row2Column).reduced (6, 0));
-    filterPosBox.setBounds (row2.withSizeKeepingCentre (juce::jmin (row2.getWidth() - 12, 200), 30));
+    characterGroup.setBounds (row2.removeFromLeft (row2Column * 3));
+    auto character = characterGroup.getLocalBounds().withTrimmedTop (24);
+    wearSlider.setBounds (character.removeFromLeft (row2Column).reduced (6, 0));
+    diffusionSlider.setBounds (character.removeFromLeft (row2Column).reduced (6, 0));
+    widthSlider.setBounds (character.reduced (6, 0));
+
+    filtersGroup.setBounds (row2);
+    auto filters = filtersGroup.getLocalBounds().withTrimmedTop (24);
+    lowCutSlider.setBounds (filters.removeFromLeft (row2Column).reduced (6, 0));
+    highCutSlider.setBounds (filters.removeFromLeft (row2Column).reduced (6, 0));
+    filterPosBox.setBounds (filters.withSizeKeepingCentre (juce::jmin (filters.getWidth() - 12, 200), 30));
 
     // Row 3: perform pad and its settings, in seven columns
     auto row3 = area.withTrimmedTop (12).withTrimmedBottom (8);
     const auto performColumn = row3.getWidth() / 7;
 
     performPad.setBounds (row3.removeFromLeft (performColumn * 2).reduced (6, 0));
-    row3.removeFromTop (20); // labels
-    throwLevelSlider.setBounds (row3.removeFromLeft (performColumn).reduced (6, 0));
-    freezeFadeSlider.setBounds (row3.removeFromLeft (performColumn).reduced (6, 0));
-    tapestopTimeSlider.setBounds (row3.removeFromLeft (performColumn).reduced (6, 0));
-    runawayDriveSlider.setBounds (row3.removeFromLeft (performColumn).reduced (6, 0));
-    auto lastColumn = row3.reduced (6, 0);
+    gestureGroup.setBounds (row3);
+    auto settings = gestureGroup.getLocalBounds().withTrimmedTop (20); // labels
+    throwLevelSlider.setBounds (settings.removeFromLeft (performColumn).reduced (6, 0));
+    freezeFadeSlider.setBounds (settings.removeFromLeft (performColumn).reduced (6, 0));
+    tapestopTimeSlider.setBounds (settings.removeFromLeft (performColumn).reduced (6, 0));
+    runawayDriveSlider.setBounds (settings.removeFromLeft (performColumn).reduced (6, 0));
+    auto lastColumn = settings.reduced (6, 0);
     inputModeBox.setBounds (lastColumn.removeFromTop (lastColumn.getHeight() / 2).withSizeKeepingCentre (lastColumn.getWidth(), 30));
     resetButton.setBounds (lastColumn.withSizeKeepingCentre (lastColumn.getWidth(), 34));
 }

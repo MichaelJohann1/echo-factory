@@ -81,5 +81,6 @@ cmake --build build -j 10
     - While it's open, the editor hides the main controls so screen readers can't reach them.
     - The close callback runs through `MessageManager::callAsync` because it deletes the dialog.
   - Keyboard focus is shown by `EchoFactoryEditor::paintOverChildren`, which is driven by a `FocusChangeListener`.
-  - Focus order is set with explicit numbers in the editor constructor. Renumber them when inserting a control.
+  - Controls sit in `ui/ControlGroup` containers: Delay (with a nested Modes group for the toggles), Character, Filters and Gesture Settings. The preset bar and the Perform pad are outside the groups. Each group has the group role and is a focus container but not a keyboard focus container, so VoiceOver sees a nested tree while Tab still runs through every control. A group lays out its children in its own coordinates, and its bounds include the label strip, because attached labels live in the slider's parent.
+  - Focus order is set with explicit numbers in the editor constructor. The numbers are local to each group, and the group's own number places it among its siblings. Renumber within the group when inserting a control.
   - Status changes such as loading and saving presets are announced with `AccessibilityHandler::postAnnouncement`.
