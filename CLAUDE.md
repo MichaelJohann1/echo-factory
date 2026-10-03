@@ -67,7 +67,7 @@ cmake --build build -j 10
   - All state is the APVTS `ValueTree`, and the current preset name is stored as a property on it (`presetName`).
   - `PresetManager` writes and reads that tree as XML `.echopreset` files in `~/Documents/ZBAudio/Echo Factory/Presets`.
   - On load, any parameter the file doesn't contain is reset to its default. This way new parameters don't inherit stale values from older presets.
-  - Factory presets are an in-memory list, currently empty.
+  - Factory presets are built in code in the `PresetManager` constructor with `addFactoryPreset(name, hint, { {&id, value}, … })`. Values are in real units, snapped to each parameter's range, and anything left out is the default. The hint is announced after "Loaded preset <name>" and tells the player which gesture to try.
   - The editor follows preset-name changes, including state the host restores, with a `ValueTree::Listener` that triggers an `AsyncUpdater`.
 - **Editor accessibility:**
   - `ui/AccessibleSlider.h` supplies a custom `AccessibilityHandler`:

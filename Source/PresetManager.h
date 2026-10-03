@@ -3,8 +3,9 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 /**
-    Factory presets live in memory (empty for now; later from BinaryData).
-    User presets are XML files in ~/Documents/ZBAudio/Echo Factory/Presets.
+    Factory presets are built in code (PresetManager.cpp), each with a spoken
+    hint about how to play it. User presets are XML files in
+    ~/Documents/ZBAudio/Echo Factory/Presets.
 */
 class PresetManager
 {
@@ -12,6 +13,7 @@ public:
     struct FactoryPreset
     {
         juce::String name;
+        juce::String hint; // read out after "Loaded preset <name>"
         juce::String xml;
     };
 
@@ -38,6 +40,10 @@ public:
     void setCurrentPresetName (const juce::String& name);
 
 private:
+    /** A preset from parameter values in real units; anything left out is the default. */
+    void addFactoryPreset (const juce::String& name, const juce::String& hint,
+                           std::initializer_list<std::pair<const juce::ParameterID*, float>> values);
+
     bool applyState (const juce::ValueTree& newState, const juce::String& name);
 
     juce::AudioProcessorValueTreeState& apvts;

@@ -4,7 +4,82 @@
 PresetManager::PresetManager (juce::AudioProcessorValueTreeState& state)
     : apvts (state)
 {
-    // Factory presets go here, e.g. { "Slapback", BinaryData::slapback_echopreset }.
+    using namespace Params::ID;
+
+    // Sync divisions by index into Params::getSyncDivisions().
+    constexpr float sixteenth = 4, eighth = 7, dottedEighth = 8, quarter = 10, dottedQuarter = 11, half = 13;
+    constexpr float on = 1, throwOnly = (float) Params::InputMode::throwOnly;
+
+    addFactoryPreset ("Init", "Every control at its default.", {});
+
+    addFactoryPreset ("Clean Slapback", "One short repeat.",
+                      { { &delayTimeMs, 110 }, { &feedback, 10 }, { &mix, 25 } });
+
+    addFactoryPreset ("Quarter Note Echo", "Repeats locked to the host tempo.",
+                      { { &sync, on }, { &syncDivision, quarter }, { &feedback, 40 }, { &mix, 30 }, { &highCut, 9000 } });
+
+    addFactoryPreset ("Dotted Ping-Pong", "Dotted eighths bouncing left and right.",
+                      { { &sync, on }, { &syncDivision, dottedEighth }, { &pingPong, on }, { &feedback, 45 }, { &mix, 30 },
+                        { &stereoWidthMs, 12 }, { &highCut, 7000 } });
+
+    addFactoryPreset ("Dub Throw", "Only thrown audio echoes. Hold F to throw.",
+                      { { &sync, on }, { &syncDivision, dottedQuarter }, { &inputMode, throwOnly }, { &throwLevelDb, 3 },
+                        { &feedback, 65 }, { &mix, 45 }, { &pingPong, on }, { &lowCut, 250 }, { &highCut, 2500 }, { &wear, 30 } });
+
+    addFactoryPreset ("Worn Tape", "Saturated, wobbly repeats. Left and right arrows bend the tape.",
+                      { { &delayTimeMs, 380 }, { &timeSmoothingMs, 300 }, { &feedback, 50 }, { &mix, 35 },
+                        { &wear, 60 }, { &highCut, 5000 } });
+
+    addFactoryPreset ("Glide Machine", "Long glides between delay times. Use left and right arrows.",
+                      { { &delayTimeMs, 300 }, { &timeSmoothingMs, 1500 }, { &feedback, 55 }, { &mix, 40 }, { &wear, 20 } });
+
+    addFactoryPreset ("Lo-Fi Radio", "Narrow, crunchy echoes.",
+                      { { &delayTimeMs, 180 }, { &feedback, 40 }, { &mix, 40 }, { &lowCut, 600 }, { &highCut, 2200 }, { &wear, 80 } });
+
+    addFactoryPreset ("Tape Stop Groove", "Hold S to stop the tape, release to spin it back up.",
+                      { { &sync, on }, { &syncDivision, eighth }, { &feedback, 45 }, { &mix, 40 }, { &wear, 25 },
+                        { &tapestopTimeMs, 400 } });
+
+    addFactoryPreset ("Runaway Wall", "Hold A to let the feedback run away.",
+                      { { &delayTimeMs, 250 }, { &feedback, 55 }, { &mix, 40 }, { &wear, 40 }, { &runawayDrive, 70 },
+                        { &lowCut, 150 }, { &highCut, 6000 } });
+
+    addFactoryPreset ("Stutter Freeze", "Tap D for instant stutters.",
+                      { { &sync, on }, { &syncDivision, sixteenth }, { &feedback, 30 }, { &mix, 50 }, { &freezeFadeMs, 10 } });
+
+    addFactoryPreset ("Backwards Memories", "Hold G to play the echoes backwards.",
+                      { { &sync, on }, { &syncDivision, half }, { &feedback, 40 }, { &mix, 45 }, { &diffusion, 30 }, { &highCut, 8000 } });
+
+    addFactoryPreset ("Echoes in a Hall", "Echoes with a reverb tail.",
+                      { { &sync, on }, { &syncDivision, quarter }, { &pingPong, on }, { &feedback, 50 }, { &mix, 35 },
+                        { &diffusion, 55 }, { &highCut, 9000 } });
+
+    addFactoryPreset ("Ambient Wash", "A reverb with no separate repeats. Feedback sets its length.",
+                      { { &delayTimeMs, 450 }, { &feedback, 75 }, { &mix, 40 }, { &diffusion, 100 }, { &stereoWidthMs, 20 },
+                        { &highCut, 8000 } });
+
+    addFactoryPreset ("Frozen Pad", "Shift and D latches a slowly swelling freeze. Backspace releases it.",
+                      { { &delayTimeMs, 600 }, { &feedback, 60 }, { &mix, 50 }, { &diffusion, 80 }, { &freezeFadeMs, 1500 },
+                        { &lowCut, 120 } });
+}
+
+void PresetManager::addFactoryPreset (const juce::String& name, const juce::String& hint,
+                                      std::initializer_list<std::pair<const juce::ParameterID*, float>> values)
+{
+    juce::ValueTree state (apvts.state.getType());
+
+    for (const auto& [id, value] : values)
+    {
+        auto* param = apvts.getParameter (id->getParamID());
+        jassert (param != nullptr);
+
+        juce::ValueTree child ("PARAM");
+        child.setProperty ("id", id->getParamID(), nullptr);
+        child.setProperty ("value", param->getNormalisableRange().snapToLegalValue (value), nullptr);
+        state.appendChild (child, nullptr);
+    }
+
+    factoryPresets.push_back ({ name, hint, state.toXmlString() });
 }
 
 juce::File PresetManager::getUserPresetDirectory()

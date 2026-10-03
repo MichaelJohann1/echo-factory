@@ -10,10 +10,14 @@ namespace
         userBaseId = 100000
     };
 
-    void announceLoad (bool succeeded, const juce::String& name)
+    void announceLoad (bool succeeded, const juce::String& name, const juce::String& hint = {})
     {
-        juce::AccessibilityHandler::postAnnouncement ((succeeded ? "Loaded preset " : "Could not load preset ") + name,
-                                                      juce::AccessibilityHandler::AnnouncementPriority::high);
+        auto text = (succeeded ? "Loaded preset " : "Could not load preset ") + name;
+
+        if (succeeded && hint.isNotEmpty())
+            text << ". " << hint;
+
+        juce::AccessibilityHandler::postAnnouncement (text, juce::AccessibilityHandler::AnnouncementPriority::high);
     }
 }
 
@@ -110,7 +114,8 @@ void PresetBar::showMenu()
             const auto& presets = self.presetManager.getFactoryPresets();
 
             if (juce::isPositiveAndBelow (index, (int) presets.size()))
-                announceLoad (self.presetManager.loadFactoryPreset (index), presets[(size_t) index].name);
+                announceLoad (self.presetManager.loadFactoryPreset (index), presets[(size_t) index].name,
+                              presets[(size_t) index].hint);
         }
     });
 }
