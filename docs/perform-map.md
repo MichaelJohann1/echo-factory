@@ -75,3 +75,4 @@ Laid out for 4×4 pad controllers starting at 36.
 | 26 | High Cut | 103 | Ping-Pong |
 | 27 | Stereo Width | 104 | Input: Throw Only |
 | 64 | Sustain pedal: Freeze, held | 105 | Filter Position |
+|    |                             | 106 | Multi-Tap (≥ 64 on) |

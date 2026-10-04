@@ -1,5 +1,6 @@
 #include "PresetManager.h"
 #include "Parameters.h"
+#include "Taps.h"
 
 PresetManager::PresetManager (juce::AudioProcessorValueTreeState& state)
     : apvts (state)
@@ -8,6 +9,7 @@ PresetManager::PresetManager (juce::AudioProcessorValueTreeState& state)
 
     // Sync divisions by index into Params::getSyncDivisions().
     constexpr float sixteenth = 4, eighth = 7, dottedEighth = 8, quarter = 10, dottedQuarter = 11, half = 13;
+    constexpr int tapSixteenth = 4, tapEighth = 7, tapDottedEighth = 8, tapDottedQuarter = 11;
     constexpr float on = 1, throwOnly = (float) Params::InputMode::throwOnly;
 
     addFactoryPreset ("Init", "Every control at its default.", {});
@@ -61,10 +63,19 @@ PresetManager::PresetManager (juce::AudioProcessorValueTreeState& state)
     addFactoryPreset ("Frozen Pad", "Shift and D latches a slowly swelling freeze. Backspace releases it.",
                       { { &delayTimeMs, 600 }, { &feedback, 60 }, { &mix, 50 }, { &diffusion, 80 }, { &freezeFadeMs, 1500 },
                         { &lowCut, 120 } });
+
+    addFactoryPreset ("Multi-Tap Rhythm", "Four taps across the stereo field. Try reversing one.",
+                      { { &sync, on }, { &syncDivision, quarter }, { &multiTap, on }, { &feedback, 30 }, { &mix, 40 },
+                        { &highCut, 9000 } },
+                      { Taps::makeTap (125, tapSixteenth, -3, -60),
+                        Taps::makeTap (250, tapEighth, -3, 60),
+                        Taps::makeTap (375, tapDottedEighth, -6, -30),
+                        Taps::makeTap (750, tapDottedQuarter, -6, 30, 12) });
 }
 
 void PresetManager::addFactoryPreset (const juce::String& name, const juce::String& hint,
-                                      std::initializer_list<std::pair<const juce::ParameterID*, float>> values)
+                                      std::initializer_list<std::pair<const juce::ParameterID*, float>> values,
+                                      std::initializer_list<juce::ValueTree> taps)
 {
     juce::ValueTree state (apvts.state.getType());
 
@@ -77,6 +88,16 @@ void PresetManager::addFactoryPreset (const juce::String& name, const juce::Stri
         child.setProperty ("id", id->getParamID(), nullptr);
         child.setProperty ("value", param->getNormalisableRange().snapToLegalValue (value), nullptr);
         state.appendChild (child, nullptr);
+    }
+
+    if (taps.size() > 0)
+    {
+        juce::ValueTree tapsTree (Taps::ID::taps);
+
+        for (const auto& tap : taps)
+            tapsTree.appendChild (tap, nullptr);
+
+        state.appendChild (tapsTree, nullptr);
     }
 
     factoryPresets.push_back ({ name, hint, state.toXmlString() });
@@ -151,6 +172,7 @@ bool PresetManager::applyState (const juce::ValueTree& newState, const juce::Str
     for (const auto* id : Params::getGestureIDs())
         stateToLoad.getChildWithProperty ("id", id->getParamID()).setProperty ("value", 0.0f, nullptr);
 
+    Taps::ensureTree (stateToLoad); // presets from before Multi-Tap get one default tap
     apvts.replaceState (stateToLoad);
     setCurrentPresetName (name);
     return true;

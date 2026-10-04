@@ -36,6 +36,21 @@ const std::array<const juce::ParameterID*, 5>& getGestureIDs()
 
 int getDefaultSyncDivisionIndex() { return 7; } // 1/8 note
 
+juce::NormalisableRange<float> getDelayTimeRange()
+{
+    juce::NormalisableRange<float> range { minDelayMs, maxDelayMs, 1.0f };
+    range.setSkewForCentre (500.0f);
+    return range;
+}
+
+float divisionToMs (int divisionIndex, double bpm)
+{
+    const auto& divisions = getSyncDivisions();
+    const auto index = juce::jlimit (0, (int) divisions.size() - 1, divisionIndex);
+    const auto ms = divisions[(size_t) index].beats * 60000.0 / juce::jmax (1.0, bpm);
+    return juce::jlimit (minDelayMs, maxDelayMs, (float) ms);
+}
+
 juce::String formatMilliseconds (float ms, bool spoken)
 {
     if (ms >= 1000.0f)
@@ -46,6 +61,14 @@ juce::String formatMilliseconds (float ms, bool spoken)
 
     const auto value = juce::String (juce::roundToInt (ms));
     return spoken ? value + (value == "1" ? " millisecond" : " milliseconds") : value + " ms";
+}
+
+float parseMilliseconds (const juce::String& text)
+{
+    const auto t = text.trim().toLowerCase();
+    const auto number = t.getFloatValue();
+    const bool isSeconds = (t.endsWith ("s") && ! t.endsWith ("ms")) || t.contains ("sec");
+    return isSeconds ? number * 1000.0f : number;
 }
 
 const juce::StringArray& getFilterPositionNames()
@@ -101,20 +124,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         return AudioParameterFloatAttributes()
             .withLabel ("ms")
             .withStringFromValueFunction ([] (float v, int) { return formatMilliseconds (v, false); })
-            .withValueFromStringFunction ([] (const String& text)
-            {
-                const auto t = text.trim().toLowerCase();
-                const auto number = t.getFloatValue();
-                const bool isSeconds = (t.endsWith ("s") && ! t.endsWith ("ms")) || t.contains ("sec");
-                return isSeconds ? number * 1000.0f : number;
-            });
+            .withValueFromStringFunction ([] (const String& text) { return parseMilliseconds (text); });
     };
 
-    NormalisableRange<float> timeRange { minDelayMs, maxDelayMs, 1.0f };
-    timeRange.setSkewForCentre (500.0f);
-
     layout.add (std::make_unique<AudioParameterFloat> (
-        ID::delayTimeMs, "Delay Time", timeRange, 400.0f, millisecondAttributes()));
+        ID::delayTimeMs, "Delay Time", getDelayTimeRange(), 400.0f, millisecondAttributes()));
 
     NormalisableRange<float> smoothingRange { 0.0f, maxTimeSmoothingMs, 1.0f };
     smoothingRange.setSkewForCentre (250.0f);
@@ -242,6 +256,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ID::diffusion, "Diffusion", NormalisableRange<float> { 0.0f, 100.0f, 0.1f }, 0.0f, percentAttributes()));
+
+    // ---- Added after release (kept last) -------------------------------------
+    // The taps themselves aren't parameters: they live in the state tree (Taps.h).
+    layout.add (std::make_unique<AudioParameterBool> (
+        ID::multiTap, "Multi-Tap", false,
+        AudioParameterBoolAttributes()
+            .withStringFromValueFunction ([] (bool v, int) { return v ? String ("On") : String ("Off"); })));
 
     return layout;
 }

@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "Parameters.h"
+#include "ui/TimeKnob.h"
 
 namespace Colours
 {
@@ -11,7 +12,7 @@ namespace Colours
 }
 
 EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
-    : AudioProcessorEditor (&p), processorRef (p), presetBar (p.presetManager), performPad (p.apvts)
+    : AudioProcessorEditor (&p), processorRef (p), presetBar (p.presetManager), performPad (p.apvts), tapsPanel (p.apvts)
 {
     setTitle ("Echo Factory");
     setDescription ("Echo Factory delay by ZBAudio");
@@ -32,14 +33,18 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
 
     // ---- Screen-reader groups -------------------------------------------
     // Focus order numbers inside a group are local to it.
+    // Taps come straight after the Delay group, whose Multi-Tap switch shows them.
     delayGroup.setExplicitFocusOrder (3);
-    characterGroup.setExplicitFocusOrder (4);
-    filtersGroup.setExplicitFocusOrder (5);
-    gestureGroup.setExplicitFocusOrder (6);
+    tapsPanel.setExplicitFocusOrder (4);
+    characterGroup.setExplicitFocusOrder (5);
+    filtersGroup.setExplicitFocusOrder (6);
+    gestureGroup.setExplicitFocusOrder (7);
     modesGroup.setExplicitFocusOrder (3); // inside the Delay group, between Smoothing and Feedback
 
     for (auto* group : { &delayGroup, &characterGroup, &filtersGroup, &gestureGroup })
         addAndMakeVisible (group);
+
+    addChildComponent (tapsPanel); // shown by Multi-Tap
 
     delayGroup.addAndMakeVisible (modesGroup);
 
@@ -103,10 +108,30 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
     modesGroup.addAndMakeVisible (freezeButton);
     freezeButtonAttachment = std::make_unique<ButtonAttachment> (p.apvts, Params::ID::freeze.getParamID(), freezeButton);
 
+    // ---- Multi-tap -------------------------------------------------------
+    multiTapButton.setTitle ("Multi-Tap");
+    multiTapButton.setDescription ("When on, the main echo is replaced by up to 16 taps, each with its own time, level, pan, "
+                                   "pitch and reverse. Delay Time and Feedback still set how often the taps repeat; "
+                                   "with feedback at zero each tap plays once. The Taps panel follows the Delay controls.");
+    multiTapButton.setWantsKeyboardFocus (true);
+    multiTapButton.setExplicitFocusOrder (4);
+    multiTapButton.onClick = [this]
+    {
+        if (multiTapButton.getToggleState())
+            juce::AccessibilityHandler::postAnnouncement ("Taps shown, after the Delay controls",
+                                                          juce::AccessibilityHandler::AnnouncementPriority::medium);
+    };
+    modesGroup.addAndMakeVisible (multiTapButton);
+    multiTapButtonAttachment = std::make_unique<ButtonAttachment> (p.apvts, Params::ID::multiTap.getParamID(), multiTapButton);
+
     // Follows the sync parameter whether it's changed here, by automation or by a preset.
     syncWatcher = std::make_unique<juce::ParameterAttachment> (
         *p.apvts.getParameter (Params::ID::sync.getParamID()),
-        [this] (float value) { updateTimeControlForSync (value >= 0.5f); });
+        [this] (float value)
+        {
+            updateTimeControlForSync (value >= 0.5f);
+            tapsPanel.setSynced (value >= 0.5f);
+        });
     syncWatcher->sendInitialUpdate();
 
     // ---- Feedback / Mix --------------------------------------------------
@@ -232,7 +257,13 @@ EchoFactoryEditor::EchoFactoryEditor (EchoFactoryProcessor& p)
 
     setWantsKeyboardFocus (false);
     setResizable (false, false);
-    setSize (860, 710);
+    setSize (mainWidth, editorHeight);
+
+    // Shows the Taps panel however Multi-Tap is changed: here, by automation, MIDI or a preset.
+    multiTapWatcher = std::make_unique<juce::ParameterAttachment> (
+        *p.apvts.getParameter (Params::ID::multiTap.getParamID()),
+        [this] (float value) { setTapsVisible (value >= 0.5f); });
+    multiTapWatcher->sendInitialUpdate();
 }
 
 EchoFactoryEditor::~EchoFactoryEditor()
@@ -283,43 +314,36 @@ void EchoFactoryEditor::updateTimeControlForSync (bool synced)
     showingSyncDivisions = synced;
     timeAttachment.reset();
 
+    timeAttachment = std::make_unique<SliderAttachment> (processorRef.apvts,
+                                                         (synced ? Params::ID::syncDivision : Params::ID::delayTimeMs).getParamID(),
+                                                         timeSlider);
+    TimeKnob::configure (timeSlider, synced);
+
     if (synced)
     {
-        const auto& divisions = Params::getSyncDivisions();
-
-        timeAttachment = std::make_unique<SliderAttachment> (processorRef.apvts, Params::ID::syncDivision.getParamID(), timeSlider);
-
-        // Compact names on screen, full names for screen readers.
-        timeSlider.textFromValueFunction = [&divisions] (double v)
-        {
-            return juce::String (divisions[(size_t) juce::jlimit (0, (int) divisions.size() - 1, juce::roundToInt (v))].shortName);
-        };
-        timeSlider.spokenTextFromValue = [&divisions] (double v)
-        {
-            return juce::String (divisions[(size_t) juce::jlimit (0, (int) divisions.size() - 1, juce::roundToInt (v))].spokenName);
-        };
-        timeSlider.setNumKeyboardSteps ((int) divisions.size() - 1);
-
         timeLabel.setText ("Delay Division", juce::dontSendNotification);
         timeSlider.setTitle ("Delay Division");
         timeSlider.setDescription ("Delay length as a note division of the host tempo, from 1/64 note to 2 bars.");
     }
     else
     {
-        timeAttachment = std::make_unique<SliderAttachment> (processorRef.apvts, Params::ID::delayTimeMs.getParamID(), timeSlider);
-
-        timeSlider.spokenTextFromValue = [] (double v) { return Params::formatMilliseconds ((float) v, true); };
-        timeSlider.setNumKeyboardSteps (100);
-
         timeLabel.setText ("Delay Time", juce::dontSendNotification);
         timeSlider.setTitle ("Delay Time");
         timeSlider.setDescription ("Delay time from 1 millisecond to 5 seconds.");
     }
+}
 
-    timeSlider.updateText();
+void EchoFactoryEditor::setTapsVisible (bool shouldShow)
+{
+    tapsVisible = shouldShow;
 
-    if (auto* handler = timeSlider.getAccessibilityHandler())
-        handler->notifyAccessibilityEvent (juce::AccessibilityEvent::valueChanged);
+    // Don't leave keyboard focus stranded in a hidden panel.
+    if (! shouldShow && tapsPanel.hasKeyboardFocus (true))
+        multiTapButton.grabKeyboardFocus();
+
+    tapsPanel.setVisible (shouldShow && saveDialog == nullptr);
+    setSize (shouldShow ? mainWidth + tapsWidth : mainWidth, editorHeight);
+    repaint();
 }
 
 void EchoFactoryEditor::showSaveDialog()
@@ -349,6 +373,8 @@ void EchoFactoryEditor::setMainControlsVisible (bool shouldBeVisible)
     // The groups take their controls and labels with them.
     for (auto* c : std::initializer_list<juce::Component*> { &presetBar, &performPad, &delayGroup, &characterGroup, &filtersGroup, &gestureGroup })
         c->setVisible (shouldBeVisible);
+
+    tapsPanel.setVisible (shouldBeVisible && tapsVisible);
 }
 
 void EchoFactoryEditor::valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier& property)
@@ -367,8 +393,9 @@ void EchoFactoryEditor::handleAsyncUpdate()
     presetBar.updatePresetName();
 }
 
-void EchoFactoryEditor::globalFocusChanged (juce::Component*)
+void EchoFactoryEditor::globalFocusChanged (juce::Component* focused)
 {
+    tapsPanel.scrollToShow (focused);
     repaint();
 }
 
@@ -388,7 +415,11 @@ void EchoFactoryEditor::paint (juce::Graphics& g)
 
     // The wear label is positioned inside its group.
     for (auto dividerY : { (float) (characterGroup.getY() + wearLabel.getY()) - 10.0f, (float) performPad.getY() - 10.0f })
-        g.drawLine (16.0f, dividerY, (float) getWidth() - 16.0f, dividerY, 1.5f);
+        g.drawLine (16.0f, dividerY, (float) mainWidth - 16.0f, dividerY, 1.5f);
+
+    // And between the main controls and the Taps panel.
+    if (tapsVisible)
+        g.drawLine ((float) mainWidth, 64.0f, (float) mainWidth, (float) getHeight() - 16.0f, 1.5f);
 }
 
 void EchoFactoryEditor::paintOverChildren (juce::Graphics& g)
@@ -409,7 +440,10 @@ void EchoFactoryEditor::paintOverChildren (juce::Graphics& g)
 
 void EchoFactoryEditor::resized()
 {
-    auto area = getLocalBounds();
+    auto area = getLocalBounds().withWidth (mainWidth);
+
+    // The Taps panel, when shown, takes the space to the right, under the top bar.
+    tapsPanel.setBounds (getLocalBounds().withTrimmedLeft (mainWidth).withTrimmedTop (48).reduced (16));
 
     auto top = area.removeFromTop (48).reduced (16, 6);
     top.removeFromLeft (170); // title text
@@ -427,13 +461,15 @@ void EchoFactoryEditor::resized()
 
     timeSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
     smoothingSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
-    modesGroup.setBounds (row1.removeFromLeft (columnWidth).withSizeKeepingCentre (columnWidth - 12, 120));
+    modesGroup.setBounds (row1.removeFromLeft (columnWidth).withSizeKeepingCentre (columnWidth - 12, 152));
     auto toggles = modesGroup.getLocalBounds();
     syncButton.setBounds (toggles.removeFromTop (40));
-    toggles.removeFromTop (4);
-    pingPongButton.setBounds (toggles.removeFromTop (36));
-    toggles.removeFromTop (4);
-    freezeButton.setBounds (toggles.removeFromTop (36));
+
+    for (auto* toggle : { &pingPongButton, &freezeButton, &multiTapButton })
+    {
+        toggles.removeFromTop (2);
+        toggle->setBounds (toggles.removeFromTop (34));
+    }
     feedbackSlider.setBounds (row1.removeFromLeft (columnWidth).reduced (6, 0));
     mixSlider.setBounds (row1.reduced (6, 0));
 

@@ -18,11 +18,8 @@ namespace
 
     constexpr float dcBlockHz = 5.0f;
 
-    // Tapestop
-    constexpr float minTapestopMs = 50.0f, maxTapestopMs = 2000.0f;
-    constexpr float spinUpRatio   = 0.5f;  // spin-up takes half the stop time
-    constexpr float silentBelow   = 0.3f;  // speed under which the output fades out
-    constexpr float spliceMs      = 50.0f;
+    // Taps
+    constexpr double tapFadeSeconds = 0.01, tapGainSeconds = 0.02, multiTapFadeSeconds = 0.02;
 
     // Reverb line lengths in ms (left, right: different for a wide, decorrelated wash).
     constexpr float diffuserMs[2][DiffusionNetwork::numLines] {
@@ -55,10 +52,10 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     sampleRate = newSampleRate;
     maxDelaySamples = (float) (maxDelayMs * 0.001 * sampleRate);
 
-    // The output head reads up to three delay times back while reversing (the
-    // segment is read backwards from one to three delay times), plus the
-    // tapestop head's trail of up to the stop plus spin-up growth.
-    maxReadSamples = 3.0f * maxDelaySamples + (float) ((maxTapestopMs * (1.0f + spinUpRatio) * 0.5f + 10.0f) * 0.001 * sampleRate);
+    // Output heads read up to four delay times back while reversing (the
+    // segment is read backwards from one to three delay times, four for a tap
+    // an octave up), plus the tapestop trail and the pitch window.
+    maxReadSamples = 4.0f * maxDelaySamples + ReadHead::maxExtraSamples (sampleRate);
     delayLine.setMaximumDelayInSamples ((int) std::ceil (maxReadSamples) + 2);
     const juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) maxBlockSize, (juce::uint32) juce::jmax (1, numChannels) };
     delayLine.prepare (spec);
@@ -75,14 +72,18 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     highCutOutFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
     lowCutOutFilter.prepare (spec);
     highCutOutFilter.prepare (spec);
+    lowCutTapFilter.setType (juce::dsp::StateVariableTPTFilterType::highpass);
+    highCutTapFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
+    lowCutTapFilter.prepare (spec);
+    highCutTapFilter.prepare (spec);
 
-    spliceStep = 1.0f / (spliceMs * 0.001f * (float) sampleRate);
+    head.prepare (sampleRate);
 
     for (size_t ch = 0; ch < 2; ++ch)
         diffusers[ch].prepare (diffuserMs[ch], preDiffuserMs[ch], sampleRate);
 
     diffusion.reset (sampleRate, 0.05);
-    reverseAmount.reset (sampleRate, 0.03);
+    multiTapAmount.reset (sampleRate, multiTapFadeSeconds);
     setTapestopTimeMs (500.0f);
 
     delaySmoothingSamples = -1; // forces the ramp length to be recalculated for this sample rate
@@ -105,6 +106,9 @@ void DelayEngine::prepare (double newSampleRate, int maxBlockSize, int numChanne
     flutterIncrement = juce::MathConstants<float>::twoPi * flutterHz / (float) sampleRate;
     pingPongAmount.reset (sampleRate, 0.02);
     widthSamples.reset (sampleRate, 0.05);
+
+    for (auto& voice : voices)
+        prepareVoice (voice);
 
     reset();
 }
@@ -140,9 +144,7 @@ void DelayEngine::reset()
     driftCountdown = 0;
 
     diffusion.setCurrentAndTargetValue (diffusion.getTargetValue());
-    reverseAmount.setCurrentAndTargetValue (reverseHeld ? 1.0f : 0.0f);
-    reverseMix = reverseAmount.getCurrentValue();
-    reversePhase = 0.0f;
+    head.reset();
 
     for (auto& network : diffusers)
         network.clear();
@@ -150,10 +152,11 @@ void DelayEngine::reset()
     diffusionActive = false;
     diffusionRt60 = 0.0f; // forces the tail length to be recalculated
 
-    tapeSpeed = tapestopHeld ? 0.0f : 1.0f;
-    tapeOffset = spliceAmount = spliceOffset = 0.0f;
-    tapestopWasHeld = tapestopHeld;
     widthSamples.setCurrentAndTargetValue (widthSamples.getTargetValue());
+
+    // Taps start again from silence the next time they're needed.
+    multiTapAmount.setCurrentAndTargetValue (multiTapAmount.getTargetValue());
+    tapsRunning = false;
 }
 
 void DelayEngine::setDelayMs (float ms)
@@ -242,92 +245,13 @@ float DelayEngine::outputFilter (int channel, float sample)
 
 void DelayEngine::setTapestopTimeMs (float ms)
 {
-    const auto stopSamples = juce::jlimit (minTapestopMs, maxTapestopMs, ms) * 0.001f * (float) sampleRate;
-    stopStep  = 1.0f / stopSamples;
-    startStep = 1.0f / (stopSamples * spinUpRatio);
+    tapestopMs = ms;
+    head.setTapestopTimeMs (ms);
 }
 
-void DelayEngine::advanceTapestop (float delay)
+float DelayEngine::readLine (int channel, float delay)
 {
-    if (tapestopWasHeld && ! tapestopHeld && tapeSpeed <= 0.0f)
-    {
-        // Released while stopped (and silent): jump the head ahead by exactly
-        // what the spin-up will lose, so it lands back on the loop.
-        const auto spinUpSamples = 1.0f / startStep;
-        tapeOffset = juce::jmax ((spinUpSamples - 1.0f) * -0.5f, 1.0f - delay);
-    }
-
-    tapestopWasHeld = tapestopHeld;
-
-    if (tapestopHeld)
-        tapeSpeed = juce::jmax (0.0f, tapeSpeed - stopStep);
-    else if (tapeSpeed < 1.0f)
-        tapeSpeed = juce::jmin (1.0f, tapeSpeed + startStep);
-
-    // The head trails further while it's slower than the tape; once stopped
-    // and silent there's nothing to track.
-    if (tapeSpeed > 0.0f)
-        tapeOffset += 1.0f - tapeSpeed;
-
-    // Back at speed but not quite on the loop (released early, or clamped):
-    // splice back to it.
-    if (tapeSpeed >= 1.0f && ! juce::approximatelyEqual (tapeOffset, 0.0f))
-    {
-        spliceOffset = tapeOffset;
-        spliceAmount = 1.0f;
-        tapeOffset = 0.0f;
-    }
-
-    spliceAmount = juce::jmax (0.0f, spliceAmount - spliceStep);
-}
-
-void DelayEngine::advanceReverse (float delay)
-{
-    // Start each press at the top of a segment, but only from fully forward
-    // so an in-progress crossfade doesn't jump.
-    if (reverseHeld && reverseMix <= 0.0f)
-        reversePhase = 0.0f;
-
-    reverseAmount.setTargetValue (reverseHeld ? 1.0f : 0.0f);
-    reverseMix = reverseAmount.getNextValue();
-
-    // The heads move backwards at tape speed, so Tapestop slows them too.
-    const auto segment = juce::jmax (2.0f, delay);
-    reversePhase += tapeSpeed;
-
-    while (reversePhase >= segment)
-        reversePhase -= segment;
-}
-
-float DelayEngine::readHeard (int channel, float delay)
-{
-    const auto read = [this, channel] (float d)
-    {
-        return delayLine.popSample (channel, juce::jlimit (1.0f, maxReadSamples, d), false);
-    };
-
-    auto heard = read (delay + tapeOffset);
-
-    if (spliceAmount > 0.0f)
-        heard += spliceAmount * (read (delay + spliceOffset) - heard);
-
-    if (reverseMix > 0.0f)
-    {
-        // Reading 2 samples further back for every sample forward plays the
-        // segment backwards. Head B is half a segment behind head A; their
-        // sin² windows sum to 1, so segment boundaries are never heard.
-        const auto segment = juce::jmax (2.0f, delay);
-        const auto phaseA = reversePhase;
-        const auto phaseB = std::fmod (reversePhase + 0.5f * segment, segment);
-        const auto windowA = juce::square (std::sin (juce::MathConstants<float>::pi * phaseA / segment));
-
-        const auto reversed = windowA * read (delay + tapeOffset + 2.0f * phaseA)
-                            + (1.0f - windowA) * read (delay + tapeOffset + 2.0f * phaseB);
-
-        heard += reverseMix * (reversed - heard);
-    }
-
-    return heard;
+    return delayLine.popSample (channel, juce::jlimit (1.0f, maxReadSamples, delay), false);
 }
 
 float DelayEngine::reverberate (int channel, float echo)
@@ -358,6 +282,8 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
     const auto numChannels = buffer.getNumChannels();
     const auto numSamples  = buffer.getNumSamples();
     const auto isStereo    = numChannels >= 2;
+
+    updateVoices (isStereo);
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -414,6 +340,7 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
             const auto hz = lowCutHz.getNextValue();
             lowCutFilter.setCutoffFrequency (hz);
             lowCutOutFilter.setCutoffFrequency (hz);
+            lowCutTapFilter.setCutoffFrequency (hz);
         }
 
         if (highCutHz.isSmoothing())
@@ -421,10 +348,10 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
             const auto hz = highCutHz.getNextValue();
             highCutFilter.setCutoffFrequency (hz);
             highCutOutFilter.setCutoffFrequency (hz);
+            highCutTapFilter.setCutoffFrequency (hz);
         }
 
-        advanceTapestop (d);
-        advanceReverse (d);
+        head.advance (d);
         // Diffusion blends the echoes into the reverb with an equal-power
         // crossfade. At 0 the reverb is out of the path; its tail is cleared.
         if (diffusionNow > 0.0f)
@@ -463,8 +390,14 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
 
             diffusionActive = false;
         }
-        const auto tapeGain = tapeSpeed >= silentBelow ? 1.0f
-                            : [] (float x) { return x * x * (3.0f - 2.0f * x); } (tapeSpeed / silentBelow);
+        const auto tapeGain = head.getGain();
+
+        // Taps read the line before the loop moves on, like the output head.
+        float taps[2] {};
+        const auto tapsMix = tapsRunning ? multiTapAmount.getNextValue() : 0.0f;
+
+        if (tapsRunning)
+            renderTaps (isStereo, modulation, taps);
 
         if (! isStereo)
         {
@@ -472,7 +405,7 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
             {
                 auto* data = buffer.getWritePointer (ch);
                 const auto dry = data[i];
-                const auto heard = readHeard (ch, d);
+                const auto heard = head.read ([this, ch] (float x) { return readLine (ch, x); }, d);
                 const auto delayed = delayLine.popSample (ch, d);
 
                 const auto echo = filter (ch, delayed);
@@ -481,7 +414,14 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
 
                 delayLine.pushSample (ch, normalWrite + frozen * (delayed - normalWrite));
 
-                data[i] = dry * (1.0f - wet) + reverberate (ch, tapeGain * outputFilter (ch, heard)) * wet;
+                auto heardEcho = tapeGain * outputFilter (ch, heard);
+
+                // Multi-tap replaces the main echo with the taps. (The main
+                // head's filters keep running so it comes back without a click.)
+                if (tapsRunning)
+                    heardEcho += tapsMix * (tapFilter (ch, taps[0]) - heardEcho);
+
+                data[i] = dry * (1.0f - wet) + reverberate (ch, heardEcho) * wet;
             }
 
             continue;
@@ -490,7 +430,8 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
         auto* left  = buffer.getWritePointer (0);
         auto* right = buffer.getWritePointer (1);
         const float dry[2] { left[i], right[i] };
-        const float heard[2] { readHeard (0, d), readHeard (1, d) };
+        const float heard[2] { head.read ([this] (float x) { return readLine (0, x); }, d),
+                               head.read ([this] (float x) { return readLine (1, x); }, d) };
         const float delayed[2] { delayLine.popSample (0, d), delayLine.popSample (1, d) };
         const float echo[2] { filter (0, delayed[0]), filter (1, delayed[1]) };
         const float looped[2] { filtersInLoop ? echo[0] : delayed[0], filtersInLoop ? echo[1] : delayed[1] };
@@ -512,8 +453,14 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
             delayLine.pushSample (ch, write + frozen * (frozenWrite[ch] - write));
         }
 
-        const float heardEcho[2] { reverberate (0, tapeGain * outputFilter (0, heard[0])),
-                                   reverberate (1, tapeGain * outputFilter (1, heard[1])) };
+        float heardEcho[2] { tapeGain * outputFilter (0, heard[0]), tapeGain * outputFilter (1, heard[1]) };
+
+        if (tapsRunning)
+            for (int ch = 0; ch < 2; ++ch)
+                heardEcho[ch] += tapsMix * (tapFilter (ch, taps[ch]) - heardEcho[ch]); // taps replace the main echo
+
+        for (int ch = 0; ch < 2; ++ch)
+            heardEcho[ch] = reverberate (ch, heardEcho[ch]);
 
         widthDelayLine.pushSample (0, heardEcho[1]);
         const auto rightEcho = widthDelayLine.popSample (0, width);
@@ -521,4 +468,191 @@ void DelayEngine::process (juce::AudioBuffer<float>& buffer)
         left[i]  = dry[0] * (1.0f - wet) + heardEcho[0] * wet;
         right[i] = dry[1] * (1.0f - wet) + rightEcho * wet;
     }
+}
+
+// ---- Taps ---------------------------------------------------------------------
+
+void DelayEngine::setTaps (const std::vector<TapSettings>& taps)
+{
+    const auto count = juce::jmin ((int) taps.size(), maxTaps);
+
+    for (int i = 0; i < count; ++i)
+    {
+        auto& voice = voices[(size_t) i];
+        const auto& tap = taps[(size_t) i];
+        voice.delayMs   = tap.delayMs;
+        voice.beats     = tap.beats;
+        voice.gain      = tap.gain;
+        voice.pan       = tap.pan;
+        voice.semitones = tap.semitones;
+        voice.reverse   = tap.reverse;
+        voice.uid       = tap.uid; // last, so a new uid comes with its settings
+    }
+
+    numTaps = count;
+}
+
+void DelayEngine::prepareVoice (TapVoice& voice)
+{
+    voice.head.prepare (sampleRate);
+    voice.gainNow.reset (sampleRate, tapGainSeconds);
+    voice.leftGain.reset (sampleRate, tapGainSeconds);
+    voice.rightGain.reset (sampleRate, tapGainSeconds);
+    voice.active.reset (sampleRate, tapFadeSeconds);
+    voice.active.setCurrentAndTargetValue (0.0f);
+    voice.delaySmoothing = -1;
+    voice.playing.uid = 0;
+}
+
+void DelayEngine::startVoice (TapVoice& voice, const TapSettings& settings)
+{
+    voice.playing = settings;
+    voice.head.setTapestop (tapestopHeld);
+    voice.head.setReverse (settings.reverse || reverseHeld);
+    voice.head.setPitchSemitones (settings.semitones);
+    voice.head.reset();
+    voice.delaySamples.setCurrentAndTargetValue (juce::jlimit (1.0f, maxDelaySamples, (float) (settings.delayMs * 0.001 * sampleRate)));
+    voice.gainNow.setCurrentAndTargetValue (settings.gain);
+
+    const auto angle = (settings.pan + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+    voice.leftGain.setCurrentAndTargetValue (std::cos (angle));
+    voice.rightGain.setCurrentAndTargetValue (std::sin (angle));
+
+    voice.active.setCurrentAndTargetValue (0.0f);
+    voice.active.setTargetValue (1.0f);
+}
+
+void DelayEngine::updateVoices (bool isStereo)
+{
+    const auto wanted = multiTapAmount.getTargetValue() > 0.0f || multiTapAmount.getCurrentValue() > 0.0f;
+
+    if (! wanted)
+    {
+        tapsRunning = false;
+        return;
+    }
+
+    if (! tapsRunning)
+    {
+        // Starting from silence: every tap fades in from its current settings.
+        lowCutTapFilter.reset();
+        highCutTapFilter.reset();
+        lowCutTapFilter.setCutoffFrequency (lowCutHz.getCurrentValue());
+        highCutTapFilter.setCutoffFrequency (highCutHz.getCurrentValue());
+
+        for (auto& voice : voices)
+        {
+            voice.active.setCurrentAndTargetValue (0.0f);
+            voice.playing.uid = 0;
+        }
+
+        tapsRunning = true;
+    }
+
+    const auto count = numTaps.load();
+
+    for (int i = 0; i < maxTaps; ++i)
+    {
+        auto& voice = voices[(size_t) i];
+
+        if (i >= count)
+        {
+            voice.active.setTargetValue (0.0f);
+            continue;
+        }
+
+        TapSettings settings;
+        settings.uid       = voice.uid.load();
+        settings.beats     = voice.beats.load();
+        settings.delayMs   = tapsSynced ? (float) (settings.beats * 60000.0 / tapsBpm) : voice.delayMs.load();
+        settings.gain      = voice.gain.load();
+        settings.pan       = isStereo ? juce::jlimit (-1.0f, 1.0f, voice.pan.load()) : 0.0f;
+        settings.semitones = voice.semitones.load();
+        settings.reverse   = voice.reverse.load();
+
+        if (settings.uid != voice.playing.uid)
+        {
+            // A different tap: fade out what's playing, then start the new one from silence.
+            if (voice.active.getCurrentValue() <= 0.0f)
+                startVoice (voice, settings);
+            else
+                voice.active.setTargetValue (0.0f);
+
+            continue;
+        }
+
+        voice.playing = settings;
+        voice.active.setTargetValue (1.0f);
+    }
+
+    for (auto& voice : voices)
+    {
+        if (voice.active.getCurrentValue() <= 0.0f && voice.active.getTargetValue() <= 0.0f)
+            continue;
+
+        const auto& settings = voice.playing;
+
+        if (voice.delaySmoothing != delaySmoothingSamples)
+        {
+            // As with the main delay time, keep any glide going from where it is.
+            voice.delaySmoothing = delaySmoothingSamples;
+            const auto current = voice.delaySamples.getCurrentValue();
+            const auto target  = voice.delaySamples.getTargetValue();
+            voice.delaySamples.reset (juce::jmax (0, delaySmoothingSamples));
+            voice.delaySamples.setCurrentAndTargetValue (current);
+            voice.delaySamples.setTargetValue (target);
+        }
+
+        voice.delaySamples.setTargetValue (juce::jlimit (1.0f, maxDelaySamples, (float) (settings.delayMs * 0.001 * sampleRate)));
+        voice.gainNow.setTargetValue (settings.gain);
+
+        const auto angle = (settings.pan + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+        voice.leftGain.setTargetValue (std::cos (angle));
+        voice.rightGain.setTargetValue (std::sin (angle));
+
+        voice.head.setTapestopTimeMs (tapestopMs);
+        voice.head.setTapestop (tapestopHeld);
+        voice.head.setReverse (settings.reverse || reverseHeld);
+        voice.head.setPitchSemitones (settings.semitones);
+    }
+}
+
+void DelayEngine::renderTaps (bool isStereo, float modulation, float out[2])
+{
+    const auto readMono = [this, isStereo] (float x)
+    {
+        return isStereo ? 0.5f * (readLine (0, x) + readLine (1, x)) : readLine (0, x);
+    };
+
+    for (auto& voice : voices)
+    {
+        if (voice.active.getCurrentValue() <= 0.0f && voice.active.getTargetValue() <= 0.0f)
+            continue;
+
+        const auto d = juce::jlimit (1.0f, maxDelaySamples, voice.delaySamples.getNextValue() + modulation);
+        voice.head.advance (d);
+
+        const auto heard = voice.head.read (readMono, d);
+        const auto gain = voice.gainNow.getNextValue() * voice.active.getNextValue() * voice.head.getGain();
+        const auto left = voice.leftGain.getNextValue(), right = voice.rightGain.getNextValue();
+
+        if (isStereo)
+        {
+            out[0] += gain * left * heard;
+            out[1] += gain * right * heard;
+        }
+        else
+        {
+            out[0] += gain * heard;
+        }
+    }
+}
+
+float DelayEngine::tapFilter (int channel, float sample)
+{
+    // The taps' own copy of the output filters, so they sound like the main echo.
+    const auto low  = lowCutTapFilter.processSample (channel, sample);
+    const auto afterLow = lowCutOn ? low : sample;
+    const auto high = highCutTapFilter.processSample (channel, afterLow);
+    return highCutOn ? high : afterLow;
 }

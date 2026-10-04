@@ -47,13 +47,22 @@ cmake --build build -j 10
   - Freeze crossfades the write path to the buffer's own unfiltered output, and rounds the delay to whole samples while frozen.
   - Filters always run, even when bypassed, so switching them on doesn't click.
   - Wear and Runaway both go through `DelayEngine::tape()` on the write path (the frozen path skips it). `tape()` applies a DC blocker, a `tanh` saturator with a ceiling, and one-pole darkening. Each is crossfaded by an amount, so Wear 0 is bit-exact clean. Wear also adds wow, flutter and random drift to the delay time, which fade out while frozen.
-  - Tapestop runs on a second, non-advancing read head: `readHeard`, which is called before the loop's `popSample`. It feeds the output only, through a separate copy of the filters (`outputFilter`). So the feedback loop and a frozen loop are never slowed.
+  - Tapestop, Reverse and Pitch live in `ReadHead` (`Source/ReadHead.*`), a read head with its own tape transport. The main output head is one `ReadHead`, and each multi-tap tap has its own. Pitch uses two heads sweeping a 50 ms window, crossfaded in, so 0 semitones is bit-exact. While reversed, pitch is done by speed instead: the reverse heads read back (1 + ratio) samples per sample. The window shifter on top of reverse would cancel it out, because at +12 the heads would stand still.
+  - Tapestop runs on a second, non-advancing read head, which reads before the loop's `popSample`. It feeds the output only, through a separate copy of the filters (`outputFilter`). So the feedback loop and a frozen loop are never slowed.
     - When the stop completes, the output is silent. The head then jumps ahead by exactly what the spin-up will add, so it lands back on the loop. If you release early, a 50 ms splice brings it back instead.
     - When idle, the output head reads the same samples as the loop, so the output is unchanged.
-  - Reverse is on the same output head. Two heads read backwards over segments one delay time long, half a segment apart, and their sin² windows sum to 1. Reads reach up to three delay times back, so the delay line holds about 3 × 5 s plus the tapestop headroom. The heads advance at tape speed, so Tapestop slows them too.
+  - Reverse is on the same output head. Two heads read backwards over segments one delay time long, half a segment apart, and their sin² windows sum to 1. Reads reach up to three delay times back, or four for a tap an octave up, so the delay line holds 4 × 5 s plus the tapestop and pitch headroom. The heads advance at tape speed, so Tapestop slows them too.
   - Diffusion is a reverb (`DiffusionNetwork`: a Jot feedback delay network with 16 lines, Hadamard mixing, 4 pre-diffusion allpasses, slow line modulation, and make-up gain to bring the level back to input level). It processes the heard echo after the loop, blended in equal power by angle Diffusion × 90°. It's never inside the loop, so it can have gain.
     - As Diffusion goes up, `handover` = Diffusion² scales down the delay's own feedback (Runaway is exempt). The reverb's RT60 moves from a 0.3 s room towards the decay the feedback would have given, 3·delay / −log10(fb), clamped to 2–20 s.
     - So at full Diffusion the delay feeds the reverb once, Feedback sets the reverb length, and no separate repeats remain. `makeupTrim` is measured by the "comes out at about input level" test, so re-measure it if the network changes.
+  - Multi-tap: up to 16 taps (`DelayEngine::maxTaps`) replace the main echo, crossfaded by `multiTapAmount`. The loop keeps running at Delay Time with Feedback, so each tap repeats every delay time. Each tap is an output-only `ReadHead` on the same line. Each tap has its own time, level, pan, pitch and Reverse.
+    - A tap reverses if its own switch is on or the global gesture is. The global Tapestop stops every tap. There's no per-tap Tapestop.
+    - A tap reads the mono sum of the line.
+    - The taps' sum goes through `tapFilter` (a third copy of the filters) and takes the main echo's place before Diffusion and Width. The main head and its filters keep running, so switching back doesn't click.
+    - With Multi-Tap off, the taps aren't processed, so the output is bit-exact.
+    - The 16 voices are preallocated. `setTaps` writes their settings as atomics, and the audio thread reads them once per block.
+    - Each tap has a `uid`. A voice given a different uid fades out and back in, instead of gliding, which happens when a tap in the middle is removed.
+    - While synced, taps convert their beats to ms on the audio thread, so offline renders follow tempo.
   - Runaway ramps feedback to 110–160% while pushing the saturator fully in. The loop stays bounded because the linear part of the loop gain stays below 1 throughout the ramp. The saturator comes in twice as fast as the feedback, so pressing Runaway can't overshoot. `tests/EngineTests.cpp` checks this.
 - **Performance** (`docs/perform-map.md` is the spec for keys and MIDI):
   - Each gesture (Throw, Freeze, Tapestop, Runaway, Reverse) is a bool parameter. Held versus latched only exists in the UI and MIDI layers.
@@ -63,6 +72,10 @@ cmake --build build -j 10
   - The AU is pinned to `aufx` even though it accepts MIDI, so it doesn't break sessions. auval warns about this, which is expected.
   - Perform-mode arrow keys go through `nudgeFeedback` and `nudgeDelayTime`, which remember the value before the first nudge so Reset can restore it.
   - `ui/PerformPad` is the focusable keyboard surface. It tracks physical keys to ignore auto-repeat, and releases held gestures when it loses focus.
+- **Taps** (`Source/Taps.*`): taps aren't parameters, because they're added and removed. There are at most 16 (`Taps::maxTaps`); `ensureTree` trims extras, and Add Tap announces the limit. They live in a `TAPS` child of the APVTS state, with one `TAP` child per tap.
+  - `Taps` is their single source of truth for identifiers, ranges, defaults and text. Only `multiTap` is a parameter, at version hint 2.
+  - `Taps::ensureTree` gives sessions and presets from before Multi-Tap one default tap. It's called in the processor constructor, in `setStateInformation` and in `PresetManager::applyState`.
+  - The processor listens to the state tree, sets `tapsDirty`, and its timer calls `engine.setTaps`.
 - **State and presets:**
   - All state is the APVTS `ValueTree`, and the current preset name is stored as a property on it (`presetName`).
   - `PresetManager` writes and reads that tree as XML `.echopreset` files in `~/Documents/ZBAudio/Echo Factory/Presets`.
@@ -82,5 +95,11 @@ cmake --build build -j 10
     - The close callback runs through `MessageManager::callAsync` because it deletes the dialog.
   - Keyboard focus is shown by `EchoFactoryEditor::paintOverChildren`, which is driven by a `FocusChangeListener`.
   - Controls sit in `ui/ControlGroup` containers: Delay (with a nested Modes group for the toggles), Character, Filters and Gesture Settings. The preset bar and the Perform pad are outside the groups. Each group has the group role and is a focus container but not a keyboard focus container, so VoiceOver sees a nested tree while Tab still runs through every control. A group lays out its children in its own coordinates, and its bounds include the label strip, because attached labels live in the slider's parent.
+  - `ui/TapsPanel` is shown by Multi-Tap, and the editor widens from 860 to 1420. It's a "Taps" group with one "Tap N" group per tap, then Add Tap, in a viewport.
+    - Its focus number puts it straight after the Delay group.
+    - Control titles carry the tap number ("Tap 2 Level").
+    - Rows bind to the tree with `Value::referTo`.
+    - The viewport and list use the `ignored` role and aren't focus containers. JUCE builds a container's accessibility children from its focus traverser, so making them containers would hide the rows.
+    - `ui/TimeKnob.h` swaps any time knob between ms and divisions. Both the main knob and the tap knobs use it.
   - Focus order is set with explicit numbers in the editor constructor. The numbers are local to each group, and the group's own number places it among its siblings. Renumber within the group when inserting a control.
   - Status changes such as loading and saving presets are announced with `AccessibilityHandler::postAnnouncement`.

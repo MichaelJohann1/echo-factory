@@ -7,6 +7,7 @@
 #include "ui/PerformPad.h"
 #include "ui/PresetBar.h"
 #include "ui/SavePresetDialog.h"
+#include "ui/TapsPanel.h"
 
 class EchoFactoryEditor : public juce::AudioProcessorEditor,
                           private juce::ValueTree::Listener,
@@ -32,6 +33,11 @@ private:
     void updateTimeControlForSync (bool synced);
     void showSaveDialog();
     void setMainControlsVisible (bool);
+    void setTapsVisible (bool);
+
+    // The main controls keep their width; Multi-Tap adds the Taps panel to the right.
+    static constexpr int mainWidth = 860, tapsWidth = 560, editorHeight = 710;
+    bool tapsVisible = false;
 
     // ValueTree::Listener — watches the preset name, including state restored by the host.
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
@@ -47,7 +53,7 @@ private:
 
     // Screen-reader groups. Declared before the controls they hold, so they outlive them.
     ControlGroup delayGroup     { "Delay", "Delay time, feedback and mix" };
-    ControlGroup modesGroup     { "Modes", "Sync, ping-pong and freeze switches" };
+    ControlGroup modesGroup     { "Modes", "Sync, ping-pong, freeze and multi-tap switches" };
     ControlGroup characterGroup { "Character", "Wear, diffusion and stereo width" };
     ControlGroup filtersGroup   { "Filters", "Low cut, high cut and filter position" };
     ControlGroup gestureGroup   { "Gesture Settings", "Input mode, how each gesture behaves, and reset" };
@@ -57,12 +63,14 @@ private:
     juce::ToggleButton syncButton { "Sync to host tempo" };
     juce::ToggleButton pingPongButton { "Ping-Pong" };
     juce::ToggleButton freezeButton { "Freeze" };
+    juce::ToggleButton multiTapButton { "Multi-Tap" };
 
     AccessibleSlider widthSlider, lowCutSlider, highCutSlider;
     juce::Label widthLabel, lowCutLabel, highCutLabel, filterPosLabel;
     juce::ComboBox filterPosBox;
 
     PerformPad performPad;
+    TapsPanel tapsPanel;
     AccessibleSlider throwLevelSlider, freezeFadeSlider, tapestopTimeSlider, runawayDriveSlider, wearSlider, diffusionSlider;
     juce::Label throwLevelLabel, freezeFadeLabel, tapestopTimeLabel, runawayDriveLabel, wearLabel, diffusionLabel, inputModeLabel;
     juce::ComboBox inputModeBox;
@@ -70,10 +78,10 @@ private:
 
     std::unique_ptr<SliderAttachment> timeAttachment, smoothingAttachment, feedbackAttachment, mixAttachment;
     std::unique_ptr<SliderAttachment> widthAttachment, lowCutAttachment, highCutAttachment;
-    std::unique_ptr<ButtonAttachment> syncButtonAttachment, pingPongButtonAttachment, freezeButtonAttachment;
+    std::unique_ptr<ButtonAttachment> syncButtonAttachment, pingPongButtonAttachment, freezeButtonAttachment, multiTapButtonAttachment;
     std::unique_ptr<SliderAttachment> throwLevelAttachment, freezeFadeAttachment, tapestopTimeAttachment, runawayDriveAttachment, wearAttachment, diffusionAttachment;
     std::unique_ptr<ComboBoxAttachment> filterPosAttachment, inputModeAttachment;
-    std::unique_ptr<juce::ParameterAttachment> syncWatcher;
+    std::unique_ptr<juce::ParameterAttachment> syncWatcher, multiTapWatcher;
     bool showingSyncDivisions = false;
 
     std::unique_ptr<SavePresetDialog> saveDialog;

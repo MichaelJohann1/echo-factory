@@ -30,12 +30,13 @@ struct Setup
     int channels = 2;
     float delayMs = 300.0f, feedback = 0.5f, wear = 0.0f, runawayDrive = 0.5f, diffusion = 0.0f;
     bool pingPong = false, filters = false;
+    int outputChannel = 0;
 };
 
 using Events = std::function<void (DelayEngine&, float seconds)>;
 using Input  = std::function<float (long sample)>;
 
-/** Runs the engine with mix at 100% and returns the left output. */
+/** Runs the engine with mix at 100% and returns the left output (or Setup::outputChannel). */
 std::vector<float> run (const Setup& s, float seconds, const Input& input, const Events& events = {})
 {
     DelayEngine e;
@@ -64,7 +65,7 @@ std::vector<float> run (const Setup& s, float seconds, const Input& input, const
         e.process (buffer);
 
         for (int i = 0; i < blockSize; ++i)
-            out.push_back (buffer.getSample (0, i));
+            out.push_back (buffer.getSample (s.outputChannel, i));
     }
 
     return out;
@@ -464,6 +465,145 @@ void testReverse()
     }
 }
 
+void testTaps()
+{
+    char d[128];
+    const auto impulse = [] (long n) { return n == 0 ? 1.0f : 0.0f; };
+
+    const auto tap = [] (int uid, float ms, float gain = 1.0f, float pan = 0.0f, float semitones = 0.0f, bool reverse = false)
+    {
+        DelayEngine::TapSettings t;
+        t.uid = uid; t.delayMs = ms; t.gain = gain; t.pan = pan; t.semitones = semitones; t.reverse = reverse;
+        return t;
+    };
+
+    // Sets the taps once, at the start.
+    const auto withTaps = [] (std::vector<DelayEngine::TapSettings> taps, bool multiTap = true) -> Events
+    {
+        return [taps, multiTap] (DelayEngine& e, float t)
+        {
+            if (t == 0.0f) { e.setTaps (taps); e.setMultiTap (multiTap); }
+        };
+    };
+
+    {
+        // A centred tap reads the mono sum at -3 dB per side; hard left is silent on the right.
+        Setup s; s.delayMs = 1000.0f; s.feedback = 0.0f;
+        const auto centre = run (s, 0.5f, impulse, withTaps ({ tap (1, 300.0f) }));
+        s.outputChannel = 1;
+        const auto leftOnly = run (s, 0.5f, impulse, withTaps ({ tap (1, 300.0f, 1.0f, -1.0f) }));
+        const auto expected = std::sqrt (0.5f);
+        std::snprintf (d, sizeof d, "centre %.6f (expected %.6f), hard left on the right %.2e", centre[14400], expected, peak (leftOnly));
+        check ("tap at 300 ms, 0 dB: impulse at -3 dB, pan law", std::abs (centre[14400] - expected) < 1e-5f
+               && peak (leftOnly) < 1e-4f && peak (centre, 0.31f) < 1e-6f, d);
+    }
+
+    {
+        // Multi-Tap replaces the main echo: with a 300 ms delay, 50% feedback and
+        // one tap at 100 ms, an impulse comes back at 100 ms, then 400 ms at half
+        // level (the tap hearing the loop's repeat), and never at 300 ms.
+        Setup s; s.channels = 1; s.delayMs = 300.0f; s.feedback = 0.5f;
+        const auto out = run (s, 0.5f, impulse, withTaps ({ tap (1, 100.0f) }));
+        const auto at = [&out] (int ms) { return out[(size_t) (ms * 48)]; };
+        std::snprintf (d, sizeof d, "100 ms %.6f, 300 ms %.2e, 400 ms %.6f", at (100), at (300), at (400));
+        check ("multi-tap on: main echo off, taps repeat with feedback", std::abs (at (100) - 1.0f) < 1e-5f
+               && std::abs (at (300)) < 1e-6f && std::abs (at (400) - 0.5f) < 1e-5f, d);
+    }
+
+    {
+        // Multi-Tap off is the plain delay, exactly, both before it's ever used and after it fades out.
+        Setup s; s.filters = true;
+        const auto ref = run (s, 3.0f, sine());
+        const auto off = run (s, 3.0f, sine(), withTaps ({ tap (1, 120.0f), tap (2, 240.0f, 0.5f, 0.5f, 7.0f) }, false));
+        const auto onThenOff = run (s, 3.0f, sine(), [&] (DelayEngine& e, float t)
+        {
+            if (t == 0.0f) e.setTaps ({ tap (1, 120.0f), tap (2, 240.0f, 0.5f, 0.5f, 7.0f) });
+            e.setMultiTap (t < 1.0f);
+        });
+        std::snprintf (d, sizeof d, "never on %.2e, after switching off %.2e", maxDiff (off, ref, 0.0f), maxDiff (onThenOff, ref, 1.1f));
+        check ("multi-tap off: bit-exact plain delay", maxDiff (off, ref, 0.0f) == 0.0f && maxDiff (onThenOff, ref, 1.1f) == 0.0f, d);
+    }
+
+    {
+        // Main echo at 5 s, so up to then only the tap is heard.
+        Setup s; s.delayMs = 5000.0f; s.feedback = 0.0f;
+        const auto plain   = run (s, 4.0f, sine(), withTaps ({ tap (1, 300.0f) }));
+        const auto octave  = run (s, 4.0f, sine(), withTaps ({ tap (1, 300.0f, 1.0f, 0.0f, 12.0f) }));
+        const auto down    = run (s, 4.0f, sine(), withTaps ({ tap (1, 300.0f, 1.0f, 0.0f, -12.0f) }));
+        const auto levelDb = [&] (const std::vector<float>& v) { return 20.0f * std::log10 (rms (v, 1.0f, 4.0f) / rms (plain, 1.0f, 4.0f)); };
+        const auto crossings = [] (const std::vector<float>& v)
+        {
+            int count = 0;
+            for (auto i = (size_t) (1.0f * sr); i + 1 < v.size(); ++i) count += (v[i] < 0.0f) != (v[i + 1] < 0.0f);
+            return (float) count;
+        };
+        const auto upRatio = crossings (octave) / crossings (plain), downRatio = crossings (down) / crossings (plain);
+        std::snprintf (d, sizeof d, "+12: %+.1f dB x%.2f, -12: %+.1f dB x%.2f, peaks %.3f %.3f",
+                       levelDb (octave), upRatio, levelDb (down), downRatio, peak (octave), peak (down));
+        check ("tap pitch +-12: an octave, about the same level, bounded", std::abs (levelDb (octave)) < 3.0f && std::abs (levelDb (down)) < 3.0f
+               && std::abs (upRatio - 2.0f) < 0.05f && std::abs (downRatio - 0.5f) < 0.05f
+               && peak (octave) < 1.0f && peak (down) < 1.0f, d);
+
+        const auto reversed = run (s, 4.0f, sine(), withTaps ({ tap (1, 300.0f, 1.0f, 0.0f, 0.0f, true) }));
+        std::snprintf (d, sizeof d, "reversed level %+.1f dB, peak %.3f", levelDb (reversed), peak (reversed));
+        check ("tap reverse on: bounded, same level", std::abs (levelDb (reversed)) < 3.0f && peak (reversed) < 1.0f, d);
+
+        // The global Tapestop stops every tap, and they come back exactly.
+        const auto stopped = run (s, 4.0f, sine(), [&] (DelayEngine& e, float t)
+        {
+            if (t == 0.0f) { e.setTaps ({ tap (1, 300.0f) }); e.setMultiTap (true); }
+            e.setTapestop (t >= 1.0f && t < 2.0f);
+        });
+        std::snprintf (d, sizeof d, "stopped rms %.5f, diff after 3 s %.2e, max step %.4f (reference %.4f)",
+                       rms (stopped, 1.6f, 2.0f), maxDiff (stopped, plain, 3.0f), maxStep (stopped), maxStep (plain));
+        check ("global tapestop on a tap: silent, exactly back, no clicks", rms (stopped, 1.6f, 2.0f) < 1e-4f
+               && maxDiff (stopped, plain, 3.0f) < 1e-6f && maxStep (stopped) <= maxStep (plain) * 1.05f, d);
+    }
+
+    {
+        // Reverse with pitch: an octave up plays the segment backwards at double
+        // speed. At the centre of head A's window (phase L/2) the tap reads
+        // L + 3 (L/2 + j) back, so out[c + j] = in[c - 2.5 L - 2 j].
+        Setup s; s.channels = 1; s.delayMs = 5000.0f; s.feedback = 0.0f;
+        const auto input = loudNoise();
+        std::vector<float> in;
+        for (long n = 0; n < (long) (1.0f * sr); ++n) in.push_back (input (n));
+        const long segment = 4800, centre = segment / 2 - 1 + 3 * segment;
+
+        for (float semitones : { 12.0f, -12.0f })
+        {
+            const auto rate = 1.0f + std::pow (2.0f, semitones / 12.0f);
+            const auto out = run (s, 1.0f, [&in] (long n) { return in[(size_t) n]; },
+                                  withTaps ({ tap (1, 100.0f, 1.0f, 0.0f, semitones, true) }));
+            float worst = 0.0f;
+            for (long j = -4; j <= 4; j += 2)
+            {
+                const auto back = (float) segment + rate * (float) (segment / 2 + j);
+                const auto readAt = (float) (centre + j) - back;
+                const auto i0 = (size_t) std::floor (readAt);
+                const auto frac = readAt - std::floor (readAt);
+                const auto expected = in[i0] + frac * (in[i0 + 1] - in[i0]);
+                worst = std::max (worst, std::abs (out[(size_t) (centre + j)] - expected));
+            }
+            char name[96];
+            std::snprintf (name, sizeof name, "tap reverse with pitch %+d: backwards at %.1fx speed", (int) semitones, rate - 1.0f);
+            std::snprintf (d, sizeof d, "worst error %.2e", worst);
+            check (name, worst < 1e-3f, d);
+        }
+    }
+
+    {
+        // More than 16 taps: only the first 16 play.
+        Setup s; s.channels = 1; s.delayMs = 5000.0f; s.feedback = 0.0f;
+        std::vector<DelayEngine::TapSettings> many;
+        for (int i = 1; i <= 20; ++i) many.push_back (tap (i, 10.0f * (float) i));
+        const auto out = run (s, 0.5f, impulse, withTaps (many));
+        const auto at = [&out] (int ms) { return out[(size_t) (ms * 48)]; };
+        std::snprintf (d, sizeof d, "tap 16 %.3f, tap 17 %.3f", at (160), at (170));
+        check ("taps: capped at 16", std::abs (at (160) - 1.0f) < 1e-5f && std::abs (at (170)) < 1e-6f, d);
+    }
+}
+
 }
 
 int main()
@@ -474,6 +614,7 @@ int main()
     testTapestop();
     testDiffusion();
     testReverse();
+    testTaps();
 
     std::printf ("%d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

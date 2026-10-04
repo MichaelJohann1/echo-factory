@@ -40,9 +40,11 @@ public:
     void setCurrentPresetName (const juce::String& name);
 
 private:
-    /** A preset from parameter values in real units; anything left out is the default. */
+    /** A preset from parameter values in real units; anything left out is the default.
+        Taps (Taps::makeTap) are optional; without them the preset has one default tap. */
     void addFactoryPreset (const juce::String& name, const juce::String& hint,
-                           std::initializer_list<std::pair<const juce::ParameterID*, float>> values);
+                           std::initializer_list<std::pair<const juce::ParameterID*, float>> values,
+                           std::initializer_list<juce::ValueTree> taps = {});
 
     bool applyState (const juce::ValueTree& newState, const juce::String& name);
 

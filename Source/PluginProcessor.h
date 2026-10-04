@@ -6,6 +6,7 @@
 
 class EchoFactoryProcessor : public juce::AudioProcessor,
                              private juce::AudioProcessorValueTreeState::Listener,
+                             private juce::ValueTree::Listener,
                              private juce::Timer
 {
 public:
@@ -67,6 +68,16 @@ private:
     void timerCallback() override;
     std::atomic<bool> resetRequested { false };
 
+    // ---- Taps (Taps.h) ---------------------------------------------------------
+    // Any change under the TAPS tree only raises a flag (state can be restored on
+    // any thread); the timer hands the taps to the engine on the message thread.
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override;
+    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&, int) override;
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override;
+    void valueTreeRedirected (juce::ValueTree&) override;
+    std::atomic<bool> tapsDirty { true };
+
     // ---- MIDI (fixed map, see docs/perform-map.md) ---------------------------
     // The audio thread only records what arrived; held notes act immediately,
     // while latches and CCs change parameters from the timer on the message thread.
@@ -106,6 +117,7 @@ private:
     std::atomic<float>* tapestopTimeParam = nullptr;
     std::atomic<float>* wearParam         = nullptr;
     std::atomic<float>* diffusionParam    = nullptr;
+    std::atomic<float>* multiTapParam     = nullptr;
 
     double hostBpm = 120.0;
 

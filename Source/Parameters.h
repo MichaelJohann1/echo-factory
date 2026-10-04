@@ -34,6 +34,9 @@ namespace Params
         // Character
         inline const juce::ParameterID wear         { "wear",         1 };
         inline const juce::ParameterID diffusion    { "diffusion",    1 };
+
+        // Added after release: version hint 2.
+        inline const juce::ParameterID multiTap     { "multiTap",     2 };
     }
 
     /** The performance gestures, in MIDI note order (Throw, Freeze, Tapestop, Runaway, Reverse). */
@@ -86,7 +89,16 @@ namespace Params
     const std::vector<SyncDivision>& getSyncDivisions();
     int getDefaultSyncDivisionIndex();
 
+    /** Delay Time's range, shared by the main knob and the tap Time knobs. */
+    juce::NormalisableRange<float> getDelayTimeRange();
+
+    /** A sync division's length at a tempo, within the delay range. */
+    float divisionToMs (int divisionIndex, double bpm);
+
     juce::String formatMilliseconds (float ms, bool spoken);
+
+    /** "250", "250 ms", "1.5 s", "2 seconds" -> milliseconds. */
+    float parseMilliseconds (const juce::String& text);
 
     /** "Off" when offHz is reached, otherwise e.g. "250 Hz" / "2.5 kilohertz". */
     juce::String formatFrequency (float hz, float offHz, bool spoken);

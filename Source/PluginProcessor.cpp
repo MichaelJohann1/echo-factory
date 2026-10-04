@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Parameters.h"
+#include "Taps.h"
 
 namespace
 {
@@ -27,6 +28,7 @@ namespace
             { 29, &Params::ID::throwLevelDb }, { 30, &Params::ID::freezeFadeMs },
             { 102, &Params::ID::sync },        { 103, &Params::ID::pingPong },
             { 104, &Params::ID::inputMode },   { 105, &Params::ID::filterPos },
+            { 106, &Params::ID::multiTap },
         };
         return map;
     }
@@ -63,12 +65,16 @@ EchoFactoryProcessor::EchoFactoryProcessor()
     tapestopTimeParam = apvts.getRawParameterValue (Params::ID::tapestopTimeMs.getParamID());
     wearParam         = apvts.getRawParameterValue (Params::ID::wear.getParamID());
     diffusionParam    = apvts.getRawParameterValue (Params::ID::diffusion.getParamID());
+    multiTapParam     = apvts.getRawParameterValue (Params::ID::multiTap.getParamID());
 
     for (size_t i = 0; i < gestureParams.size(); ++i)
         gestureParams[i] = apvts.getRawParameterValue (Params::getGestureIDs()[i]->getParamID());
 
     for (auto& cc : pendingCC)
         cc = -1.0f;
+
+    Taps::ensureTree (apvts.state);
+    apvts.state.addListener (this);
 
     apvts.addParameterListener (Params::ID::reset.getParamID(), this);
     startTimerHz (60);
@@ -77,7 +83,37 @@ EchoFactoryProcessor::EchoFactoryProcessor()
 EchoFactoryProcessor::~EchoFactoryProcessor()
 {
     stopTimer();
+    apvts.state.removeListener (this);
     apvts.removeParameterListener (Params::ID::reset.getParamID(), this);
+}
+
+void EchoFactoryProcessor::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
+{
+    if (tree.hasType (Taps::ID::tap) || tree.hasType (Taps::ID::taps))
+        tapsDirty = true;
+}
+
+void EchoFactoryProcessor::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
+{
+    if (parent.hasType (Taps::ID::taps) || child.hasType (Taps::ID::taps))
+        tapsDirty = true;
+}
+
+void EchoFactoryProcessor::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
+{
+    if (parent.hasType (Taps::ID::taps) || child.hasType (Taps::ID::taps))
+        tapsDirty = true;
+}
+
+void EchoFactoryProcessor::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
+{
+    if (parent.hasType (Taps::ID::taps))
+        tapsDirty = true;
+}
+
+void EchoFactoryProcessor::valueTreeRedirected (juce::ValueTree&)
+{
+    tapsDirty = true;
 }
 
 void EchoFactoryProcessor::parameterChanged (const juce::String&, float newValue)
@@ -88,6 +124,9 @@ void EchoFactoryProcessor::parameterChanged (const juce::String&, float newValue
 
 void EchoFactoryProcessor::timerCallback()
 {
+    if (tapsDirty.exchange (false))
+        engine.setTaps (Taps::toEngineSettings (apvts.state.getChildWithName (Taps::ID::taps)));
+
     if (resetRequested.exchange (false))
         resetPerformance();
 
@@ -281,11 +320,7 @@ float EchoFactoryProcessor::getTargetDelayMs() const
     if (syncParam->load() < 0.5f)
         return delayTimeParam->load();
 
-    const auto& divisions = Params::getSyncDivisions();
-    const auto index = juce::jlimit (0, (int) divisions.size() - 1, juce::roundToInt (syncDivisionParam->load()));
-    const auto ms = divisions[(size_t) index].beats * 60000.0 / hostBpm;
-
-    return juce::jlimit (Params::minDelayMs, Params::maxDelayMs, (float) ms);
+    return Params::divisionToMs (juce::roundToInt (syncDivisionParam->load()), hostBpm);
 }
 
 void EchoFactoryProcessor::updateEngineParameters()
@@ -319,6 +354,8 @@ void EchoFactoryProcessor::updateEngineParameters()
     engine.setTapestop (isGestureOn (2));
     engine.setReverse (isGestureOn (4));
     engine.setDiffusion (diffusionParam->load() * 0.01f);
+    engine.setMultiTap (multiTapParam->load() >= 0.5f);
+    engine.setTapTempo (syncParam->load() >= 0.5f, hostBpm);
 }
 
 void EchoFactoryProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -353,7 +390,11 @@ void EchoFactoryProcessor::setStateInformation (const void* data, int sizeInByte
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+        {
+            auto state = juce::ValueTree::fromXml (*xml);
+            Taps::ensureTree (state); // sessions from before Multi-Tap
+            apvts.replaceState (state);
+        }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

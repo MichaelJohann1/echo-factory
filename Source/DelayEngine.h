@@ -2,6 +2,7 @@
 
 #include <juce_dsp/juce_dsp.h>
 #include "DiffusionNetwork.h"
+#include "ReadHead.h"
 
 /**
     Stereo feedback delay with smoothed time, feedback and mix, plus 12 dB/oct
@@ -51,11 +52,31 @@
     Reverse also lives on the output head: two heads read backwards over
     segments one delay time long, half a segment apart, with sin² windows that
     always sum to 1. The loop is untouched, so a frozen loop plays backwards and
-    comes back as it was. The heads slow with Tapestop.
+    comes back as it was. The heads slow with Tapestop. Both live in ReadHead.
+
+    Multi-tap replaces the main echo with up to 16 taps: output-only read heads
+    on the same line, each with its own time, level, pan, pitch and Reverse
+    (which also follows the global gesture; the global Tapestop stops every
+    tap). The loop still runs at the main delay time, so with feedback each tap
+    repeats every delay time. The taps' sum goes through its own copy of the
+    output filters, then into Diffusion and Width in place of the main echo.
+    With Multi-tap off they aren't processed at all.
 */
 class DelayEngine
 {
 public:
+    /** One tap's settings, in real units. uid identifies the tap, so a voice fades
+        out and back in when it's given a different tap rather than gliding. */
+    struct TapSettings
+    {
+        int uid = 0;
+        float delayMs = 250.0f, gain = 1.0f, pan = 0.0f, semitones = 0.0f; // pan -1 (left) to 1 (right)
+        float beats = 0.25f; // length in quarter notes, used instead of delayMs while synced
+        bool reverse = false;
+    };
+
+    static constexpr int maxTaps = 16;
+
     void prepare (double sampleRate, int maxBlockSize, int numChannels, float maxDelayMs, float maxWidthMs);
     void reset();
 
@@ -85,10 +106,18 @@ public:
     void setRunaway (bool shouldRunAway)   { runawayAmount.setTargetValue (shouldRunAway ? 1.0f : 0.0f); }
     void setRunawayDrive (float amount01)  { runawayDrive.setTargetValue (juce::jlimit (0.0f, 1.0f, amount01)); }
 
-    void setTapestop (bool shouldStop)     { tapestopHeld = shouldStop; }
-    void setReverse (bool shouldReverse)   { reverseHeld = shouldReverse; }
+    void setTapestop (bool shouldStop)     { tapestopHeld = shouldStop; head.setTapestop (shouldStop); }
+    void setReverse (bool shouldReverse)   { reverseHeld = shouldReverse; head.setReverse (shouldReverse); }
     void setDiffusion (float amount01)     { diffusion.setTargetValue (juce::jlimit (0.0f, 1.0f, amount01)); }
     void setTapestopTimeMs (float ms);
+
+    void setMultiTap (bool shouldUseTaps)  { multiTapAmount.setTargetValue (shouldUseTaps ? 1.0f : 0.0f); }
+
+    /** While synced, tap times come from their beats at this tempo. */
+    void setTapTempo (bool synced, double bpm) { tapsSynced = synced; tapsBpm = juce::jmax (1.0, bpm); }
+
+    /** Any thread; taps past maxTaps are ignored. */
+    void setTaps (const std::vector<TapSettings>& taps);
 
     void process (juce::AudioBuffer<float>& buffer);
 
@@ -96,16 +125,11 @@ private:
     float filter (int channel, float sample);
     float outputFilter (int channel, float sample);
 
-    /** Advances the tapestop transport and the reverse heads by one sample. */
-    void advanceTapestop (float delay);
-    void advanceReverse (float delay);
-
     /** Blends the heard echo into the reverb; untouched while Diffusion is 0. */
     float reverberate (int channel, float echo);
 
-
-    /** What the output read head hears. Call before the loop's popSample for this sample. */
-    float readHeard (int channel, float delay);
+    /** The line read at a delay, clamped to what it holds. Call before the loop's popSample for this sample. */
+    float readLine (int channel, float delay);
 
     /** DC blocking, saturation and darkening, each scaled so 0 leaves the sample untouched. */
     float tape (int channel, float sample, float amount, float ceiling, float darken);
@@ -115,7 +139,7 @@ private:
     juce::dsp::StateVariableTPTFilter<float> lowCutFilter, highCutFilter;
     juce::dsp::StateVariableTPTFilter<float> lowCutOutFilter, highCutOutFilter;
     juce::SmoothedValue<float> delaySamples, feedback, mix, freezeAmount, pingPongAmount, widthSamples, inputSend;
-    juce::SmoothedValue<float> wear, runawayAmount, runawayDrive, diffusion, reverseAmount;
+    juce::SmoothedValue<float> wear, runawayAmount, runawayDrive, diffusion;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> lowCutHz { 20.0f }, highCutHz { 20000.0f };
     bool lowCutOn = false, highCutOn = false, filtersInLoop = true;
     int delaySmoothingSamples = -1, freezeFadeSamples = -1;
@@ -130,15 +154,38 @@ private:
     int driftCountdown = 0;
     juce::Random random;
 
-    // Tapestop state: speed 1 is normal, offset is how far the output head trails the loop.
-    bool tapestopHeld = false, tapestopWasHeld = false;
-    float tapeSpeed = 1.0f, tapeOffset = 0.0f, stopStep = 0.0f, startStep = 0.0f;
-    float spliceAmount = 0.0f, spliceOffset = 0.0f, spliceStep = 0.0f;
-    float maxReadSamples = 1.0f;
+    // The output head: Tapestop and Reverse act on what you hear, never the loop.
+    ReadHead head;
+    bool tapestopHeld = false, reverseHeld = false;
+    float maxReadSamples = 1.0f, tapestopMs = 500.0f;
 
-    // Reverse: phase through the current segment, and how far in reverse is (0..1).
-    bool reverseHeld = false;
-    float reversePhase = 0.0f, reverseMix = 0.0f;
+    // ---- Taps -----------------------------------------------------------------
+    struct TapVoice
+    {
+        // Written by the message thread.
+        std::atomic<int> uid { 0 };
+        std::atomic<float> delayMs { 250.0f }, beats { 0.25f }, gain { 1.0f }, pan { 0.0f }, semitones { 0.0f };
+        std::atomic<bool> reverse { false };
+
+        // Audio thread only.
+        TapSettings playing;   // what this voice is playing; follows the settings while uid matches
+        int delaySmoothing = -1;
+        ReadHead head;
+        juce::SmoothedValue<float> delaySamples, gainNow, leftGain, rightGain, active;
+    };
+
+    void prepareVoice (TapVoice&);
+    void startVoice (TapVoice&, const TapSettings&);
+    void updateVoices (bool isStereo);
+    void renderTaps (bool isStereo, float modulation, float out[2]);
+    float tapFilter (int channel, float sample);
+
+    std::array<TapVoice, maxTaps> voices;
+    std::atomic<int> numTaps { 0 };
+    juce::SmoothedValue<float> multiTapAmount;
+    bool tapsRunning = false, tapsSynced = false;
+    double tapsBpm = 120.0;
+    juce::dsp::StateVariableTPTFilter<float> lowCutTapFilter, highCutTapFilter;
 
     std::array<DiffusionNetwork, 2> diffusers;
     float diffusionCos = 1.0f, diffusionSin = 0.0f, diffusionSetting = 0.0f, diffusionRt60 = 0.0f, diffusionMakeup = 1.0f;
