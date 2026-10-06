@@ -34,6 +34,7 @@ juce_add_plugin(EchoFactory
     IS_SYNTH                 FALSE
     NEEDS_MIDI_INPUT         TRUE   # AU stays aufx (AU_MAIN_TYPE), so sessions keep loading
     NEEDS_MIDI_OUTPUT        FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     IS_MIDI_EFFECT           FALSE
     AU_MAIN_TYPE             kAudioUnitType_Effect
     VST3_CATEGORIES          Fx Delay
@@ -76,6 +77,12 @@ target_link_libraries(EchoFactory
         juce::juce_recommended_warning_flags)
 
 # ---- Offline engine tests (not part of the default build) ------------------
+juce_add_console_app(EditorFocusTests PRODUCT_NAME "EditorFocusTests")
+set_target_properties(EditorFocusTests PROPERTIES EXCLUDE_FROM_ALL TRUE)
+target_sources(EditorFocusTests PRIVATE tests/EditorFocusTests.cpp)
+target_include_directories(EditorFocusTests PRIVATE Source)
+target_link_libraries(EditorFocusTests PRIVATE EchoFactory juce::juce_audio_utils juce::juce_dsp)
+
 #   cmake --build build --target EngineTests && ./build/EngineTests_artefacts/Debug/EngineTests
 juce_add_console_app(EngineTests PRODUCT_NAME "EngineTests")
 set_target_properties(EngineTests PROPERTIES EXCLUDE_FROM_ALL TRUE)

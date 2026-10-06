@@ -81,6 +81,23 @@ uses a fallback tempo of 120 BPM; a DAW supplies tempo to the VST3 plugin.
 Screen-reader labels and keyboard support are inherited from upstream; a
 Windows screen-reader and DAW compatibility pass is still needed.
 
+The editor accepts keyboard focus from its host window and transfers it to the
+preset menu, so entering the interface does not require a mouse click. In
+REAPER with OSARA, use F6 from the FX window to enter the plugin, then Tab and
+Shift+Tab to navigate. The standalone window also allows keyboard entry into
+the editor. Previously the editor was a non-focusable keyboard focus container,
+which prevented the outer window from reaching its controls.
+
+Editor traversal regression tests (no audio device needed):
+
+```powershell
+cmake --build build --config Release --target EditorFocusTests --parallel 4
+& .\build\EditorFocusTests_artefacts\Release\EditorFocusTests.exe
+```
+
+These check host-to-editor focus eligibility, the preset-menu entry point, and
+forward/backward traversal. They do not replace an NVDA/REAPER interaction test.
+
 ### macOS
 
 Requires CMake 3.22+ and the Xcode Command Line Tools.
