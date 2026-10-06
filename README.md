@@ -85,7 +85,10 @@ The editor accepts keyboard focus from its host window and transfers it to the
 preset menu, so entering the interface does not require a mouse click. In
 REAPER with OSARA, use F6 from the FX window to enter the plugin, then Tab and
 Shift+Tab to navigate. The standalone window also allows keyboard entry into
-the editor. Previously the editor was a non-focusable keyboard focus container,
+the editor. Its Windows launcher explicitly activates the window and focuses
+the preset menu after startup, so Tab works without an initial mouse click.
+This startup handoff applies only to the standalone app, not the VST3 plugin.
+Previously the editor was a non-focusable keyboard focus container,
 which prevented the outer window from reaching its controls.
 
 Editor traversal regression tests (no audio device needed):

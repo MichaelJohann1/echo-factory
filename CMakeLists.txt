@@ -44,6 +44,13 @@ juce_add_plugin(EchoFactory
     NEEDS_WEB_BROWSER        FALSE
     NEEDS_CURL               FALSE)
 
+# Windows needs an explicit initial focus handoff after showing the native window.
+# Keep the plugin wrapper and other platforms on their existing entry points.
+if(WIN32)
+    target_sources(EchoFactory_Standalone PRIVATE Source/StandaloneApp.cpp)
+    target_compile_definitions(EchoFactory_Standalone PRIVATE JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1)
+endif()
+
 target_sources(EchoFactory
     PRIVATE
         Source/Parameters.cpp
