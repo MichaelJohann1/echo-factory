@@ -12,7 +12,15 @@ project(ECHO_FACTORY VERSION 0.1.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
+endif()
+
+set(EF_PLUGIN_FORMATS VST3 Standalone)
+if(APPLE)
+    list(APPEND EF_PLUGIN_FORMATS AU)
+endif()
+option(EF_COPY_PLUGIN_AFTER_BUILD "Install plugins after building" ${APPLE})
 
 add_subdirectory(JUCE)
 
@@ -22,7 +30,7 @@ juce_add_plugin(EchoFactory
     PLUGIN_MANUFACTURER_CODE ${EF_MANUFACTURER_CODE}
     PLUGIN_CODE              ${EF_PLUGIN_CODE}
     PRODUCT_NAME             "${EF_PRODUCT_NAME}"
-    FORMATS                  AU VST3 Standalone
+    FORMATS                  ${EF_PLUGIN_FORMATS}
     IS_SYNTH                 FALSE
     NEEDS_MIDI_INPUT         TRUE   # AU stays aufx (AU_MAIN_TYPE), so sessions keep loading
     NEEDS_MIDI_OUTPUT        FALSE
@@ -31,7 +39,7 @@ juce_add_plugin(EchoFactory
     VST3_CATEGORIES          Fx Delay
     MICROPHONE_PERMISSION_ENABLED TRUE   # without it macOS gives the Standalone silent input
     MICROPHONE_PERMISSION_TEXT    "Echo Factory processes live audio from your microphone or audio interface."
-    COPY_PLUGIN_AFTER_BUILD  TRUE
+    COPY_PLUGIN_AFTER_BUILD  ${EF_COPY_PLUGIN_AFTER_BUILD}
     NEEDS_WEB_BROWSER        FALSE
     NEEDS_CURL               FALSE)
 
