@@ -8,7 +8,7 @@ set(EF_BUNDLE_ID         "com.zbaudio.echofactory")
 set(EF_MANUFACTURER_CODE "Zbau")   # 4 chars, at least one upper-case
 set(EF_PLUGIN_CODE       "Ecfy")   # 4 chars, exactly one upper-case
 
-project(ECHO_FACTORY VERSION 0.1.0)
+project(ECHO_FACTORY VERSION 0.2.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
