@@ -78,8 +78,9 @@ The outputs are:
 Windows defaults to building without installing plugins into Program Files.
 `EF_COPY_PLUGIN_AFTER_BUILD` can opt into automatic installation. The standalone
 uses a fallback tempo of 120 BPM; a DAW supplies tempo to the VST3 plugin.
-Screen-reader labels and keyboard support are inherited from upstream; a
-Windows screen-reader and DAW compatibility pass is still needed.
+Keyboard entry and Tab/Shift+Tab navigation have been confirmed by an NVDA user
+in the Windows standalone app and REAPER. Other hosts and screen readers have
+not been verified.
 
 The editor accepts keyboard focus from its host window and transfers it to the
 preset menu, so entering the interface does not require a mouse click. In
